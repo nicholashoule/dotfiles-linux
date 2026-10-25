@@ -1,0 +1,24 @@
+{
+  "setup": [
+    {
+      "name": "gitconfig",
+      "run": ["bash", "home/.local/share/helpers/sh/init-gitconfig.sh"],
+      "creates": ".gitconfig"
+    },
+    {
+      "name": "oh-my-posh",
+      "run": ["bash", "home/.local/share/helpers/sh/install-oh-my-posh.sh"],
+      "provides": "oh-my-posh"
+    },
+    {
+      "name": "meslo-nerd-font",
+      "run": ["oh-my-posh", "font", "install", "Meslo"],
+      "creates": ".local/share/fonts/meslolgl-nerd-font/MesloLGLNerdFont-Regular.ttf"
+    },
+    {
+      "name": "dotnet-sdk",
+      "run": ["bash", "home/.local/share/helpers/sh/install-dotnet.sh"],
+      "creates": ".dotnet/dotnet"
+    }
+  ]
+}

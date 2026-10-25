@@ -1,0 +1,37 @@
+# CI: ShellCheck and the regression checks on Ubuntu, and the secret scan over
+# every tracked file (see Checks in README.md).
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: ShellCheck
+        run: >-
+          shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh
+          home/.local/share/helpers/sh/*.sh home/.local/share/bash-completion/completions/*
+          scripts/*.sh tests/check.sh .githooks/pre-commit
+
+      - name: Regression checks
+        run: bash tests/check.sh
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The same scan the pre-commit hook runs, over every tracked file, so a
+      # commit made with --no-verify or without the hook still fails here.
+      - name: Secret scan
+        run: bash scripts/check-secrets.sh --all

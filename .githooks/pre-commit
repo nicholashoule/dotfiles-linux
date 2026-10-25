@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Pre-commit checks on the staged content of each commit, not the working tree:
+#   - scripts/check-secrets.sh: secrets, force-added ignored files, personal details
+#   - bash -n: syntax errors in staged shell files
+#   - shellcheck on staged shell files, when it is installed (CI always runs it)
+#   - pre-commit run: the .pre-commit-config.yaml checks, when pre-commit is installed
+# Every check runs, and the commit is blocked if any of them fails.
+# Enable once per clone:  git config core.hooksPath .githooks
+# Skip for one reviewed commit with `git commit --no-verify`; CI still checks it.
+set -euo pipefail
+# CDPATH can redirect cd to another directory and make it print the path.
+unset CDPATH
+
+# Global variables
+readonly SHEBANG='^#!.*[/[:space:]](ba)?sh([[:space:]]|$)'
+FAILED=()
+STAGED_DIR=''
+TMP_DIR=''
+
+# cleanup removes the temporary directory if it exists.
+cleanup() {
+    if [[ -n $TMP_DIR && -d $TMP_DIR ]]; then
+        rm -rf -- "$TMP_DIR"
+    fi
+}
+
+# staged_shell_files prints, NUL-separated, the staged paths that are shell
+# files: *.sh and *.bash files, Bash startup and logout files, and files whose
+# staged first line is a sh or bash shebang or a `# shellcheck shell=` directive.
+staged_shell_files() {
+    local path first
+    while IFS= read -r -d '' path; do
+        case $path in
+            *.sh | *.bash | .bashrc | */.bashrc | .bash_profile | */.bash_profile | .bash_logout | */.bash_logout)
+                printf '%s\0' "$path"
+                continue
+                ;;
+        esac
+        first=''
+        IFS= read -r first < <(git show ":$path" 2>/dev/null) || true
+        if [[ $first =~ $SHEBANG || $first == '# shellcheck shell='* ]]; then
+            printf '%s\0' "$path"
+        fi
+    done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+}
+
+# check_secrets runs the secret scan on the staged content.
+check_secrets() {
+    bash scripts/check-secrets.sh --staged || FAILED+=('secret scan')
+}
+
+# check_syntax runs `bash -n` on each staged shell file PATH...
+check_syntax() {
+    local path status=0
+    for path in "$@"; do
+        (cd -- "$STAGED_DIR" && bash -n -- "$path") || status=1
+    done
+    [[ $status -eq 0 ]] || FAILED+=('bash -n')
+}
+
+# check_shellcheck runs shellcheck on the staged shell files PATH... when it is
+# installed, from the staged copy so its messages name repository paths.
+check_shellcheck() {
+    if ! command -v shellcheck >/dev/null; then
+        printf 'pre-commit: shellcheck is not installed, so it was skipped; CI runs it\n' >&2
+        return 0
+    fi
+    (cd -- "$STAGED_DIR" && shellcheck -- "$@") || FAILED+=('shellcheck')
+}
+
+# check_pre_commit runs the pre-commit framework's checks from
+# .pre-commit-config.yaml on the staged files when pre-commit is installed. It
+# skips that file's ShellCheck hook, which needs Docker, because check_shellcheck
+# already ran ShellCheck. It runs last: pre-commit stashes unstaged changes while
+# its checks run, and its fixers rewrite files, which blocks the commit until
+# their fixes are staged.
+check_pre_commit() {
+    if ! command -v pre-commit >/dev/null; then
+        printf 'pre-commit: pre-commit is not installed, so .pre-commit-config.yaml was skipped\n' >&2
+        return 0
+    fi
+    SKIP="shellcheck${SKIP:+,$SKIP}" pre-commit run --hook-stage pre-commit || FAILED+=('pre-commit run')
+}
+
+# main finds the staged shell files, copies their staged content aside, and runs
+# every check, failing if any of them failed.
+main() {
+    local path failed
+    local -a shell_files=()
+    cd -- "$(git rev-parse --show-toplevel)"
+    trap cleanup EXIT
+    TMP_DIR=$(mktemp -d)
+    STAGED_DIR="$TMP_DIR/staged"
+    while IFS= read -r -d '' path; do
+        shell_files+=("$path")
+    done < <(staged_shell_files)
+
+    check_secrets
+    if [[ ${#shell_files[@]} -gt 0 ]]; then
+        # checkout-index writes the staged version, which may differ from the
+        # working tree when only part of a file is staged.
+        printf '%s\0' "${shell_files[@]}" | git checkout-index -z --stdin --prefix="$STAGED_DIR/"
+        check_syntax "${shell_files[@]}"
+        check_shellcheck "${shell_files[@]}"
+    fi
+    check_pre_commit
+
+    if [[ ${#FAILED[@]} -gt 0 ]]; then
+        printf -v failed '%s, ' "${FAILED[@]}"
+        printf 'pre-commit: commit blocked; failed: %s\n' "${failed%, }" >&2
+        exit 1
+    fi
+}
+# Execute the main function with all command-line arguments.
+main "$@"

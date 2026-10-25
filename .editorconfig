@@ -1,0 +1,62 @@
+# EditorConfig keeps every editor on this repository's conventions.
+# https://editorconfig.org
+# Neovim, JetBrains IDEs, and GitHub's web editor read this file natively;
+# VS Code needs the EditorConfig extension, and Vim 9 ships a plugin that
+# `packadd! editorconfig` in a vimrc turns on. AGENTS.md describes the
+# conventions themselves.
+#
+# Each section is a glob. A glob without a slash matches a file name at any
+# depth; a glob with one is relative to this directory, so `**` stands in for
+# "any directories". When several sections match a file, later ones win: general
+# rules come first and exceptions after them.
+
+# Stop the search here, so no .editorconfig in a parent directory applies.
+root = true
+
+# Every file: UTF-8, Unix line endings (.gitattributes enforces them too), a
+# final newline, no trailing whitespace, and four-space indentation.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Bash: snippets, helpers, completions, repository scripts, the extensionless
+# startup and logout files, and Git hooks. The other keys are read by the shfmt
+# formatter and record the existing style: Bash syntax, `case` patterns indented,
+# `&&` and `||` ending a line rather than starting the next, no space after a
+# redirection (>file), and a function's opening brace on the same line as its name.
+[{**.sh,**.bash,home/.bashrc,home/.bash_profile,home/.bash_logout,.githooks/*}]
+indent_size = 4
+shell_variant = bash
+switch_case_indent = true
+binary_next_line = false
+space_redirects = false
+function_next_line = false
+
+# JSON and YAML (the manifest, the GitHub workflows, Dependabot): two spaces.
+[*.{json,yml,yaml}]
+indent_size = 2
+
+# The Oh My Posh theme keeps the upstream file's formatting (see the README's
+# credits), so it stays easy to compare with the original; editors must not
+# rewrite its whitespace or last line.
+[home/.config/oh-my-posh/themes/*.omp.json]
+trim_trailing_whitespace = unset
+insert_final_newline = unset
+
+# Markdown: two trailing spaces are a hard line break, and nested list content
+# aligns with its list marker instead of a fixed width. Prose wraps at 80 columns.
+[*.md]
+trim_trailing_whitespace = false
+indent_size = unset
+
+# Git's config syntax is conventionally indented with tabs.
+[home/.config/git/config]
+indent_style = tab
+
+# Vim script: two spaces, as in home/.vimrc.
+[{home/.vimrc,**.vim}]
+indent_size = 2

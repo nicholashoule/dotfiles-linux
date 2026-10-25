@@ -1,0 +1,48 @@
+# Git defaults shared across machines, installed as ~/.config/git/config.
+# https://git-scm.com/docs/git-config
+#
+# Git reads this file, then ~/.gitconfig, so ~/.gitconfig wins. Keep your name,
+# email, signing key, and credential helpers there, outside this repository:
+#   git config --global user.name 'Your Name'
+#   git config --global user.email you@example.com
+# `git config --global` writes to ~/.gitconfig only when that file exists, so the
+# gitconfig setup step creates a starter one (init-gitconfig.sh). Without it, Git
+# writes to this file, and the change lands in the repository through the link.
+# Requires Git 2.37 or later (push.autoSetupRemote, merge.conflictStyle zdiff3).
+
+[init]
+	defaultBranch = main
+[pull]
+	rebase = true           # replay local commits on top of the fetched branch
+[push]
+	autoSetupRemote = true  # a new branch's first push sets its upstream
+[fetch]
+	prune = true            # drop remote-tracking branches deleted upstream
+[rebase]
+	autoStash = true
+	autoSquash = true
+[commit]
+	verbose = true          # show the diff while writing the message
+[diff]
+	algorithm = histogram
+	colorMoved = default
+[merge]
+	conflictStyle = zdiff3  # show the common ancestor in conflicts
+[rerere]
+	enabled = true          # remember and reuse conflict resolutions
+[branch]
+	sort = -committerdate
+[tag]
+	sort = version:refname
+[help]
+	autocorrect = prompt
+
+# An alias named like a built-in command, such as prune, is ignored by Git.
+[alias]
+	br = branch
+	co = checkout
+	gconf = config --global --edit
+	ghist = log --graph --date-order --date=relative --abbrev-commit --pretty=format:'%C(dim cyan)%G?%C(reset) %C(yellow)%h%C(reset) - %C(green)(%cr)%C(reset) %C(bold white)%an%C(reset) %s %C(bold blue)%d%C(reset)'
+	hash = rev-parse HEAD
+	rprune = remote prune origin
+	unstage = restore --staged --
