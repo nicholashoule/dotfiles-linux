@@ -1,0 +1,72 @@
+# Secret patterns match at any depth, including under home/. Repository-local
+# entries start with / so they never hide a managed dotfile such as home/.claude/.
+
+# Local manager builds; the manager's source lives in its own repository
+/bin/
+
+# Keys, certificates, and keystores
+*.crt
+*.jks
+*.key
+*.keystore
+*.p12
+*.pem
+*.pfx
+
+# Credentials, by name: AWS, Cargo, gcloud, RubyGems, and Terraform all store
+# secrets in a file named credentials or credentials.<ext>.
+**/client_secret*.json
+**/credentials
+**/credentials.*
+
+# Credentials under other names: tokens, passwords, and private keys that tools
+# write into the home directory. In .ssh only config and public keys are allowed.
+# For a deliberate, secret-free copy of one of these files, use `git add -f`.
+**/.azure/
+**/.config/gcloud/
+**/.config/gh/hosts.yml
+**/.docker/config.json
+**/.git-credentials
+**/.gnupg/
+**/.kube/config
+**/.my.cnf
+**/.netrc
+**/.npmrc
+**/.pgpass
+**/.pypirc
+**/.ssh/*
+!**/.ssh/config
+!**/.ssh/*.pub
+**/.vault-token
+
+# Shell and tool histories: personal data that often holds secrets
+**/.bash_history
+**/.lesshst
+**/.mysql_history
+**/.node_repl_history
+**/.psql_history
+**/.python_history
+**/.sqlite_history
+**/.viminfo
+**/.zsh_history
+
+# Environment files (.env.* does not match a direnv .envrc)
+.env
+.env.*
+
+# Editors, operating systems, and agent local state
+/.vscode/
+/.idea/
+/.claude/
+/.copilot/
+/.openai/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+/tmp/

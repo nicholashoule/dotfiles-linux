@@ -1,0 +1,22 @@
+# Store and check out text files with LF endings; Bash fails on CRLF.
+* text=auto eol=lf
+
+# Shell
+*.sh          text eol=lf
+*.bash        text eol=lf
+.bashrc       text eol=lf
+.bash_profile text eol=lf
+.bash_logout  text eol=lf
+
+# Docs and config
+*.md      text eol=lf diff=markdown
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+LICENSE   text eol=lf
+.vimrc    text eol=lf
+.curlrc   text eol=lf
+
+# Git
+.gitattributes text eol=lf
+.gitignore     text eol=lf

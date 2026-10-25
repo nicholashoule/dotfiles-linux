@@ -1,0 +1,36 @@
+---
+# pre-commit (https://pre-commit.com) checks, run on demand. They complement the
+# repository's own hook, .githooks/pre-commit, and do not replace it: with
+# `git config core.hooksPath .githooks` set, `pre-commit install` refuses to
+# install, so run these by hand:
+#   pre-commit run --all-files   # every check on every tracked file
+#   pre-commit autoupdate        # refresh the revs below
+# The ShellCheck hook runs ShellCheck's official Docker image, so it needs
+# Docker; without it, skip that hook with SKIP=shellcheck.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+      # The Oh My Posh themes keep the upstream files' formatting, as in
+      # .editorconfig.
+      - id: end-of-file-fixer
+        exclude: ^home/\.config/oh-my-posh/themes/
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        exclude: ^home/\.config/oh-my-posh/themes/
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+
+  # Bash files, found by extension, Bash startup file name, or shebang.
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.11.0
+    hooks:
+      - id: shellcheck
