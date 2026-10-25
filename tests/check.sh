@@ -466,16 +466,19 @@ check_secret_scan() {
     pass "secret scan accepts a file with a !exception in .gitignore"
 }
 
-# run_hook HOME REPO prints the output of .githooks/pre-commit run in REPO with
-# HOME, ignoring the real global Git config, and returns its status.
+# run_hook HOME REPO [VAR=value...] prints the output of .githooks/pre-commit run
+# in REPO with HOME, HOME/bin first on PATH, and the variables, ignoring the real
+# global Git config, and returns its status.
 run_hook() {
-    (cd "$2" && env -i HOME="$1" PATH="$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-        "$BASH" .githooks/pre-commit 2>&1)
+    (cd "$2" && env -i HOME="$1" PATH="$1/bin:$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+        "${@:3}" "$BASH" .githooks/pre-commit 2>&1)
 }
 
 # .githooks/pre-commit checks the staged content, not the working tree: it passes
 # clean files, blocks a secret and a syntax error (also in a file found only by
-# its shebang), and blocks shellcheck warnings when shellcheck is installed.
+# its shebang), and blocks shellcheck warnings when shellcheck is installed. It
+# runs pre-commit, a stub here, with that file's ShellCheck hook added to SKIP,
+# blocks the commit when pre-commit fails, and skips it when it is not installed.
 check_pre_commit_hook() {
     local home repo output status token
     if ! command -v git >/dev/null; then
@@ -490,6 +493,14 @@ check_pre_commit_hook() {
     cp "$REPO/.githooks/pre-commit" "$repo/.githooks/pre-commit"
     cp "$REPO/scripts/check-secrets.sh" "$repo/scripts/check-secrets.sh"
     cp "$REPO/.gitignore" "$repo/.gitignore"
+    # The stub pre-commit records how it was run, and fails when STUB_STATUS says.
+    mkdir -p "$home/bin"
+    cat >"$home/bin/pre-commit" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s SKIP=%s\n' "$*" "${SKIP-}" >"$HOME/pre-commit.log"
+exit "${STUB_STATUS:-0}"
+SCRIPT
+    chmod +x "$home/bin/pre-commit"
 
     cat >"$repo/tools/run" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -528,6 +539,30 @@ SCRIPT
         pass "pre-commit blocks shellcheck warnings"
     else
         skip "pre-commit, shellcheck" "shellcheck is not installed"
+    fi
+
+    git -C "$repo" read-tree --empty
+    printf 'notes\n' >"$repo/notes.txt"
+    git -C "$repo" add notes.txt
+    status=0
+    output=$(run_hook "$home" "$repo" SKIP=check-yaml) || status=$?
+    [[ $status -eq 0 && $(<"$home/pre-commit.log") == 'run --hook-stage pre-commit SKIP=shellcheck,check-yaml' ]] ||
+        fail "pre-commit, pre-commit run" "exit status $status: $output; ran: $(<"$home/pre-commit.log")"
+    status=0
+    output=$(run_hook "$home" "$repo" STUB_STATUS=1) || status=$?
+    [[ $status -eq 1 && $output == *'failed: pre-commit run'* ]] ||
+        fail "pre-commit, pre-commit run" "exit status $status: $output"
+    pass "pre-commit runs pre-commit without its ShellCheck hook, and blocks when it fails"
+
+    rm "$home/bin/pre-commit"
+    if ! command -v pre-commit >/dev/null; then
+        status=0
+        output=$(run_hook "$home" "$repo") || status=$?
+        [[ $status -eq 0 && $output == *'pre-commit is not installed'* ]] ||
+            fail "pre-commit, no pre-commit" "exit status $status: $output"
+        pass "pre-commit skips pre-commit when it is not installed"
+    else
+        skip "pre-commit, no pre-commit" "pre-commit is installed"
     fi
 }
 

@@ -1,8 +1,9 @@
 ---
-# pre-commit (https://pre-commit.com) checks, run on demand. They complement the
-# repository's own hook, .githooks/pre-commit, and do not replace it: with
-# `git config core.hooksPath .githooks` set, `pre-commit install` refuses to
-# install, so run these by hand:
+# pre-commit (https://pre-commit.com) checks. The repository's own hook,
+# .githooks/pre-commit, runs them on the staged files when pre-commit is
+# installed, after its own checks. It replaces `pre-commit install`, which
+# refuses to install while `git config core.hooksPath .githooks` is set.
+#   pre-commit install-hooks     # once per clone: download the hook environments
 #   pre-commit run --all-files   # every check on every tracked file
 #   pre-commit autoupdate        # refresh the revs below
 # The ShellCheck hook runs ShellCheck's official Docker image, so it needs
@@ -30,6 +31,8 @@ repos:
         args: [--allow-missing-credentials]
 
   # Bash files, found by extension, Bash startup file name, or shebang.
+  # .githooks/pre-commit skips this hook by its id, shellcheck, because it runs
+  # ShellCheck itself.
   - repo: https://github.com/koalaman/shellcheck-precommit
     rev: v0.11.0
     hooks:

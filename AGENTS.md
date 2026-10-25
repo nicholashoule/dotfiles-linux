@@ -89,8 +89,10 @@ to change it without breaking its guarantees.
   the date and time on a 12-hour clock (`time_format`
   `Mon Jan _2 03:04:05 PM MST 2006`), as every theme except the upstream
   `jandedobbeleer` does; the checks render each theme and enforce it.
-- Optionally, run `pre-commit run --all-files` for the extra hygiene checks in
-  `.pre-commit-config.yaml` (it complements `.githooks/pre-commit`).
+- With pre-commit installed, `.githooks/pre-commit` also runs the hygiene checks
+  in `.pre-commit-config.yaml` on staged files; run `pre-commit run --all-files`
+  to check every file. The hook skips that file's ShellCheck hook by its id,
+  `shellcheck`, so keep that id if you replace the hook.
 - Before finishing, run:
 
 ```sh

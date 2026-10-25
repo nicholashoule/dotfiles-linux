@@ -218,8 +218,10 @@ out of it:
    Findings name the file and line without printing the secret. The same hook
    runs `bash -n` and, when it is installed, ShellCheck on staged shell files
    (by extension, Bash startup file name, shebang, or `# shellcheck shell=`
-   directive). It checks the staged content, not the working tree, runs every
-   check, and blocks the commit if any of them fails.
+   directive), then, when [pre-commit](https://pre-commit.com) is installed,
+   the checks in `.pre-commit-config.yaml` (see [Checks](#checks)). It checks
+   the staged content, not the working tree, runs every check, and blocks the
+   commit if any of them fails.
 3. GitHub Actions runs the same scan over every tracked file, so a commit made
    without the hook, or with `git commit --no-verify`, still fails.
 
@@ -469,6 +471,11 @@ that links this clone, so commit them deliberately.
   without the secret. Remove the secret, or for a reviewed false positive add a
   `secret-scan: allow` comment or a `!path` exception to `.gitignore`.
   `git commit --no-verify` skips the hook, but CI still runs the scan.
+- **A commit is blocked by `pre-commit run`:** its output names each failed
+  hook. A fixer (line endings, final newlines, trailing whitespace) has already
+  fixed the file; review and stage the fix, then commit again. To skip one hook
+  for a reviewed commit, name its id: `SKIP=check-yaml git commit`. A first
+  commit without network access fails until `pre-commit install-hooks` has run.
 - **A new shell starts slowly:** time it with `time bash -i -c exit`, and find
   the slow snippet with `bash -x -i -c exit 2>&1 | less`. Completion generators
   and `go env` run once per shell.
@@ -535,10 +542,20 @@ request.
 [pre-commit](https://pre-commit.com): YAML and JSON syntax, merge conflict
 markers, file name case conflicts, line endings, final newlines, trailing
 whitespace (Markdown line breaks and the themes' upstream formatting excepted),
-shebangs and executable bits, private keys, AWS credentials, and ShellCheck. Run
-them with `pre-commit run --all-files`; `pre-commit install` refuses to run
-because `core.hooksPath` points Git at `.githooks`. The ShellCheck hook needs
-Docker; without it, use `SKIP=shellcheck`.
+shebangs and executable bits, private keys, AWS credentials, and ShellCheck.
+When pre-commit is installed, the pre-commit hook runs them on the staged files
+after its own checks, skipping the ShellCheck hook, which needs Docker, because
+the hook already ran ShellCheck. That replaces `pre-commit install`, which
+refuses to run because `core.hooksPath` points Git at `.githooks`. Install
+pre-commit with your package manager (`sudo dnf install pre-commit`) or
+`pipx install pre-commit`, then, once per clone, download the hook environments
+so commits never wait on the network:
+
+```sh
+pre-commit install-hooks    # once per clone
+pre-commit run --all-files  # every check on every tracked file (SKIP=shellcheck without Docker)
+pre-commit autoupdate       # refresh the pinned hook versions
+```
 
 To also link, check, and unlink every file under `home/` in a temporary home,
 and dry-run the setup steps, pass a built manager:

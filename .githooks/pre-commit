@@ -3,6 +3,7 @@
 #   - scripts/check-secrets.sh: secrets, force-added ignored files, personal details
 #   - bash -n: syntax errors in staged shell files
 #   - shellcheck on staged shell files, when it is installed (CI always runs it)
+#   - pre-commit run: the .pre-commit-config.yaml checks, when pre-commit is installed
 # Every check runs, and the commit is blocked if any of them fails.
 # Enable once per clone:  git config core.hooksPath .githooks
 # Skip for one reviewed commit with `git commit --no-verify`; CI still checks it.
@@ -67,6 +68,20 @@ check_shellcheck() {
     (cd -- "$STAGED_DIR" && shellcheck -- "$@") || FAILED+=('shellcheck')
 }
 
+# check_pre_commit runs the pre-commit framework's checks from
+# .pre-commit-config.yaml on the staged files when pre-commit is installed. It
+# skips that file's ShellCheck hook, which needs Docker, because check_shellcheck
+# already ran ShellCheck. It runs last: pre-commit stashes unstaged changes while
+# its checks run, and its fixers rewrite files, which blocks the commit until
+# their fixes are staged.
+check_pre_commit() {
+    if ! command -v pre-commit >/dev/null; then
+        printf 'pre-commit: pre-commit is not installed, so .pre-commit-config.yaml was skipped\n' >&2
+        return 0
+    fi
+    SKIP="shellcheck${SKIP:+,$SKIP}" pre-commit run --hook-stage pre-commit || FAILED+=('pre-commit run')
+}
+
 # main finds the staged shell files, copies their staged content aside, and runs
 # every check, failing if any of them failed.
 main() {
@@ -88,6 +103,7 @@ main() {
         check_syntax "${shell_files[@]}"
         check_shellcheck "${shell_files[@]}"
     fi
+    check_pre_commit
 
     if [[ ${#FAILED[@]} -gt 0 ]]; then
         printf -v failed '%s, ' "${FAILED[@]}"
