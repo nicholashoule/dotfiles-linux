@@ -15,7 +15,7 @@ jobs:
   shell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: ShellCheck
         run: >-
@@ -29,7 +29,7 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The same scan the pre-commit hook runs, over every tracked file, so a
       # commit made with --no-verify or without the hook still fails here.
