@@ -1,0 +1,23 @@
+# Readline settings, installed as ~/.inputrc, for bash and every other program
+# that uses readline. A ~/.inputrc replaces /etc/inputrc, so that file loads
+# first to keep the distribution's key bindings (Home, End, Ctrl+arrows), and an
+# unmanaged ~/.inputrc.local loads last for machine-specific settings. Readline
+# skips either include quietly when its file is missing.
+# https://tiswww.case.edu/php/chet/readline/rluserman.html#Readline-Init-File-Syntax
+$include /etc/inputrc
+
+# Completion lists mark types: / after directories, * after executables, and @
+# after symlinks.
+set visible-stats on
+
+# Completion lists in color: each candidate by type from LS_COLORS (directories
+# di, executables ex, symlinks ln, files fi, and words that are not files, such
+# as subcommands and options, mi), and the part already typed in its own color;
+# .bashrc sets those last two. Readline before 8.1 has no version test and skips
+# this block, so its lists stay plain instead of printing errors at every prompt.
+$if version >= 8.1
+set colored-stats on
+set colored-completion-prefix on
+$endif
+
+$include ~/.inputrc.local

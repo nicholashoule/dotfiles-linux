@@ -12,7 +12,8 @@ manager's Go source, tests, and binaries live in the `homeskillet` repository.
   Telemetry is off wherever a tool allows it.
 - **Completion:** Tab completion through bash-completion on any distribution,
   completions for the snippets' tools and for homeskillet, and a directory for
-  your own, loaded on first use.
+  your own, loaded on first use. Completion lists color directories, files,
+  and subcommands apart (`.inputrc`).
 - **Prompt:** Oh My Posh with the `bubblesextra` theme, showing the path, Git
   state, language versions, battery, and the date and time.
 - **Terminal:** Ptyxis and GNOME Terminal set to the prompt's Nerd Font, with
@@ -160,7 +161,7 @@ home/                        linked into your home directory, file by file
   .bashrc.d/                 one snippet per tool, plus aliases and functions
   .config/git/  .config/tmux/  .config/oh-my-posh/themes/
   .local/share/helpers/sh/   helper commands
-  .curlrc  .hushlogin  .vimrc
+  .curlrc  .hushlogin  .inputrc  .vimrc
 dotfiles.json                setup steps for homeskillet
 scripts/check-secrets.sh     secret scan, run by the hook and CI
 tests/check.sh               regression checks
@@ -345,6 +346,30 @@ so pass it only fixed words or values you have checked, never raw command
 output. The checks require every file in the repository's completions directory
 to register a completion for the command it is named after.
 
+Completion lists are in color, set by [.inputrc](home/.inputrc), readline's
+configuration, and by `LS_COLORS`:
+
+| Candidate | Color (`LS_COLORS` entry) |
+| --- | --- |
+| Directories, followed by `/` | `di`, bold blue by default |
+| Executables, followed by `*` | `ex`, bold green |
+| Symlinks, followed by `@` | `ln`, bold cyan |
+| Other files | `fi` and patterns such as `*.tar`, from the distribution |
+| Words that are not files, such as `homeskillet link` or `--force` | `mi`, yellow (`00;33`) |
+| The part already typed | `*.readline-colored-completion-prefix`, bold magenta (`01;35`) |
+
+Readline uses `mi`, its "missing file" color, for every candidate that is not a
+file, so bash cannot color subcommands and options differently. Many
+distributions set `mi` to white on red, so `.bashrc` appends the last two
+entries to `LS_COLORS` after the distribution's, where they win; `ls` shows a
+broken symlink's target in `mi` too. Readline reads `LS_COLORS` once, when it
+starts, and any `bind` command starts it, so `.bashrc` sets these before
+bash-completion and the snippets. `.inputrc` first includes `/etc/inputrc`,
+which a `~/.inputrc` would otherwise replace, to keep the distribution's key
+bindings, and last includes an unmanaged `~/.inputrc.local`. Readline 8.1 or
+later (bash 5.1) shows the colors; older versions skip them and keep plain
+lists, without errors.
+
 ## Git, Editors, and Login
 
 [home/.config/git/config](home/.config/git/config) holds shared Git defaults:
@@ -452,6 +477,7 @@ homeskillet never manages:
 | Git name, email, signing key, credential helpers | `~/.gitconfig`, created by the `gitconfig` setup step and then yours: `git config --global` writes there; `init-gitconfig.sh --force` backs it up and writes a fresh starter |
 | Logout tasks for one machine | `~/.bash_logout.local`, created by you; `.bash_logout` runs it last |
 | Prompt theme | `OHMYPOSH_THEME` in `local.sh`, which loads before `oh-my-posh.sh`: a theme's name from `~/.config/oh-my-posh/themes`, such as `bubbles`, or a path to any theme file; every bundled theme except `jandedobbeleer` starts with the date and time at the left |
+| Completion list colors | `LS_COLORS` entries appended in `local.sh`, such as `LS_COLORS+=':mi=00;36'` (later entries win); readline settings, such as `set colored-stats off`, in `~/.inputrc.local` |
 | Tab completion for a command | a file named after it in `~/.local/share/bash-completion/completions` for one machine, or under `home/.local/share/bash-completion/completions/` to share it (see [Completion](#completion)) |
 | Go's `GOBIN`, `GOPATH`, or other settings | `go env -w`, which Go saves outside this repository |
 
@@ -479,6 +505,13 @@ that links this clone, so commit them deliberately.
 - **Tab completes only file names:** bash-completion is not installed or not
   loaded. Install it, open a new terminal, and check that
   `echo "${BASH_COMPLETION_VERSINFO[*]}"` prints a version.
+- **Completion lists have no colors:** `bind -v | grep colored-stats` should
+  print `on`; readline before 8.1 leaves it off. If it is on but the colors are
+  the distribution's, something ran `bind` before `.bashrc` set `LS_COLORS`,
+  such as a line in `~/.bash_profile`; move it to `~/.bashrc.d/local.sh`.
+- **Home, End, or Ctrl+arrow keys stopped working:** `~/.inputrc` replaces
+  `/etc/inputrc`, which it includes to keep those bindings. Check that
+  `/etc/inputrc` exists, and add missing bindings to `~/.inputrc.local`.
 - **A completion file does not load:** its name must match the command
   (`mytool` or `mytool.bash`), and it loads once per shell, so after editing it
   run `complete -r mytool` or open a new terminal. Check it with `bash -n` and
@@ -546,14 +579,18 @@ when each is ready (with stub `gpg`, `gh`, and `glab`), receives
 `git config --global`, and replaces a file only with `--force`, after backing it
 up, and that every snippet stays silent when its tool is missing. When
 bash-completion is installed, it also checks that `.bashrc` loads it and that it
-loads a completion from the user directory on first use. When vim and tmux are
-installed, it loads `.vimrc` and `tmux.conf`, fails on any error, and checks
-vim's ruler, tmux's terminal title, and the red tab of a window running `sudo`
-or `su` (stand-ins named after them, so nothing runs as root). When Oh My Posh
-is installed, it renders every theme except `jandedobbeleer` and requires the
-date and time at the start of its top line; otherwise those checks are reported
-as skipped. It stops at the first failure and exits 0 when every check passes, 1
-when a check fails, and 2 on a usage error.
+loads a completion from the user directory on first use. It also checks that
+`.inputrc` loads without readline errors and turns on the completion list
+settings, that `~/.inputrc.local` loads last, and that `.bashrc` appends the
+completion colors to `LS_COLORS` once, keeping its export state, and only in
+interactive shells. When vim and tmux are installed, it loads `.vimrc` and
+`tmux.conf`, fails on any error, and checks vim's ruler, tmux's terminal title,
+and the red tab of a window running `sudo` or `su` (stand-ins named after them,
+so nothing runs as root). When Oh My Posh is installed, it renders every theme
+except `jandedobbeleer` and requires the date and time at the start of its top
+line; otherwise those checks are reported as skipped. It stops at the first
+failure and exits 0 when every check passes, 1 when a check fails, and 2 on a
+usage error.
 
 ShellCheck needs no options, so it also works on a single file and in editor
 integrations. Sourced files have no shebang, so each one starts with a

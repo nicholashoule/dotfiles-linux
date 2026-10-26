@@ -345,6 +345,61 @@ complete -p mytool
 BASH
 }
 
+# .inputrc loads without a readline error, with the distribution's /etc/inputrc
+# where there is one, and turns on the completion list settings (readline 8.1 or
+# later). An ~/.inputrc.local in HOME loads last and wins. Loading it into a
+# non-interactive shell needs emacs mode, without which bind only warns.
+check_inputrc() {
+    local home
+    home=$(new_home)
+    expect ".inputrc settings" 'set colored-completion-prefix on|set colored-stats on|set visible-stats on|' \
+        "$home" -- "$REPO/home/.inputrc" <<'BASH'
+set -o emacs
+bind -f "$1"
+while IFS= read -r line; do
+    case $line in
+        'set colored-stats '* | 'set colored-completion-prefix '* | 'set visible-stats '*) printf '%s|' "$line" ;;
+    esac
+done < <(bind -v)
+BASH
+    printf 'set visible-stats off\n' >"$home/.inputrc.local"
+    expect ".inputrc loads ~/.inputrc.local last" 'set visible-stats off' "$home" -- "$REPO/home/.inputrc" <<'BASH'
+set -o emacs
+bind -f "$1"
+while IFS= read -r line; do
+    case $line in 'set visible-stats '*) printf '%s' "$line" ;; esac
+done < <(bind -v)
+BASH
+}
+
+# .bashrc appends the completion colors to LS_COLORS once, however often it runs,
+# after the distribution's entries so they win, sets just these when LS_COLORS
+# is unset, keeps LS_COLORS's export state, and leaves non-interactive shells
+# alone. Only that block of .bashrc runs, its interactive-only test replaced.
+check_completion_colors() {
+    local home colors
+    home=$(new_home)
+    colors='mi=00;33:*.readline-colored-completion-prefix=01;35'
+    expect ".bashrc completion colors" "di=01;34:mi=01;37;41:$colors|exported|$colors|unexported|di=01;34" \
+        "$home" -- "$REPO/home/.bashrc" "$SED_BIN" <<'BASH'
+rc=$1 sed=$2
+block() { "$sed" -n -e '/^# Completion list colors$/,/^fi$/p' "$rc"; }
+interactive() { source <(block | "$sed" 's/\[\[ \$- == \*i\* \]\]/true/'); }
+export LS_COLORS='di=01;34:mi=01;37;41:'
+interactive
+interactive
+printf '%s|' "$LS_COLORS"
+if [[ $(declare -p LS_COLORS) == 'declare -x '* ]]; then printf 'exported|'; fi
+unset LS_COLORS
+interactive
+printf '%s|' "$LS_COLORS"
+if [[ $(declare -p LS_COLORS) != 'declare -x '* ]]; then printf 'unexported|'; fi
+LS_COLORS='di=01;34'
+source <(block)
+printf '%s' "$LS_COLORS"
+BASH
+}
+
 # Every ~/.bashrc.d snippet is silent and leaves PATH alone when its tool is missing.
 check_snippets_without_tools() {
     local home rc
@@ -1222,6 +1277,8 @@ main() {
     check_completion_files
     check_homeskillet_completion
     check_completion_loading
+    check_inputrc
+    check_completion_colors
     check_aws_region
     check_telemetry_defaults
     check_history

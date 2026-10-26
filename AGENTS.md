@@ -50,6 +50,9 @@ to change it without breaking its guarantees.
   differ between versions. Silence `compopt`, which fails outside completion.
 - `compgen -W` expands its word list: give it fixed words, or command output
   filtered to plain values first.
+- Readline reads `LS_COLORS` once, when it starts, and any `bind` starts it, so
+  `.bashrc` sets the completion colors before bash-completion and the snippets.
+  Keep anything readline reads at startup there, never in a snippet.
 - A tool's own generated completion belongs in its snippet instead, following
   the snippet rules above, as `homeskillet.sh` does.
 
