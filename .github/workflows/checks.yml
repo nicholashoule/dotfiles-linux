@@ -20,8 +20,7 @@ jobs:
       - name: ShellCheck
         run: >-
           shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh
-          home/.local/share/helpers/sh/*.sh home/.local/share/bash-completion/completions/*
-          scripts/*.sh tests/check.sh .githooks/pre-commit
+          home/.local/share/helpers/sh/*.sh scripts/*.sh tests/check.sh .githooks/pre-commit
 
       - name: Regression checks
         run: bash tests/check.sh

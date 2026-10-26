@@ -10,8 +10,9 @@
 #   2. environment     ~/.local/bin and ~/bin lead PATH so user tools win, and
 #                      the helpers in ~/.local/share/helpers/sh go last;
 #                      DO_NOT_TRACK opts out of telemetry
-#   3. completion      bash-completion for interactive shells, unless step 1
-#                      already loaded it, so every snippet can register its own
+#   3. completion      completion list colors, then bash-completion for
+#                      interactive shells, unless step 1 already loaded it, so
+#                      every snippet can register its own
 #   4. ~/.bashrc.d/*   one file per tool, sourced in glob (alphabetical) order;
 #                      prefix a name with 00- or zz- to run it first or last.
 #                      Machine-specific settings go in an unmanaged
@@ -57,6 +58,25 @@ export DO_NOT_TRACK=${DO_NOT_TRACK:-1}
 
 # Uncomment the following line if you don't like systemctl's auto-paging feature:
 # export SYSTEMD_PAGER=
+
+# Completion list colors
+# ~/.inputrc colors completion lists from LS_COLORS. Readline shows words that
+# are not files, such as subcommands and options, in the "missing file" color mi,
+# which many distributions set to white on red, and the part already typed in
+# the socket color. These entries come after the distribution's, so they win:
+# such words in yellow and the typed part in bold magenta (ls also shows a broken
+# symlink's target in mi). Readline reads LS_COLORS once, when it starts, and any
+# `bind` starts it, so this runs before bash-completion and the snippets. To
+# change a color, append an entry in ~/.bashrc.d/local.sh: LS_COLORS+=':mi=00;36'
+# Nothing runs or expands here; LS_COLORS keeps its export state.
+if [[ $- == *i* ]]; then
+    completion_colors='mi=00;33:*.readline-colored-completion-prefix=01;35'
+    case ":${LS_COLORS-}:" in
+        *":$completion_colors:"*) ;;
+        *) LS_COLORS="${LS_COLORS:+${LS_COLORS%:}:}$completion_colors" ;;
+    esac
+    unset completion_colors
+fi
 
 # Programmable completion from the bash-completion package
 # https://github.com/scop/bash-completion

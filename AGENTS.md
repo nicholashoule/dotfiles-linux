@@ -19,9 +19,10 @@ to change it without breaking its guarantees.
   .githooks`); it and CI enforce part of this rule.
 - Never put a file under `home/` that tools write personal settings into, such
   as `~/.gitconfig`: writes follow the link into this repository. Create such a
-  file once with a setup step and a helper that never replaces an existing file,
-  as `init-gitconfig.sh` does, and keep the shared settings in a linked file the
-  tool also reads (`~/.config/git/config`).
+  file once with a setup step and a helper that leaves an existing file alone
+  unless asked (`--force`), and then renames it to a backup first, as
+  `init-gitconfig.sh` does. Keep the shared settings in a linked file the tool
+  also reads (`~/.config/git/config`).
 
 ## Shell Snippets (`home/.bashrc.d/*.sh`)
 
@@ -39,16 +40,21 @@ to change it without breaking its guarantees.
 ## Completions (`home/.local/share/bash-completion/completions/`)
 
 - `.bashrc` loads bash-completion before the snippets; it lazy-loads a file from
-  this directory the first time its command is completed. Name each file after
-  its command (`name.bash`), start it with `# shellcheck shell=bash` and a
-  comment saying what it completes, and register only that command.
+  this directory the first time its command is completed. The directory exists
+  only once it holds a hand-written completion. Name each file after its command
+  (`name.bash`), start it with `# shellcheck shell=bash` and a comment saying
+  what it completes, and register only that command; the checks source each
+  file and run ShellCheck on it.
 - Write plain Bash (`COMP_WORDS`, `COMP_CWORD`, `compgen`, and
   `mapfile -t COMPREPLY`), not bash-completion's helper functions, whose names
   differ between versions. Silence `compopt`, which fails outside completion.
 - `compgen -W` expands its word list: give it fixed words, or command output
   filtered to plain values first.
+- Readline reads `LS_COLORS` once, when it starts, and any `bind` starts it, so
+  `.bashrc` sets the completion colors before bash-completion and the snippets.
+  Keep anything readline reads at startup there, never in a snippet.
 - A tool's own generated completion belongs in its snippet instead, following
-  the snippet rules above.
+  the snippet rules above, as `homeskillet.sh` does.
 
 ## Functions, Helpers, and Scripts
 
@@ -97,6 +103,6 @@ to change it without breaking its guarantees.
 
 ```sh
 bash tests/check.sh /path/to/homeskillet
-shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh home/.local/share/helpers/sh/*.sh home/.local/share/bash-completion/completions/* scripts/*.sh tests/check.sh .githooks/pre-commit
+shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh home/.local/share/helpers/sh/*.sh scripts/*.sh tests/check.sh .githooks/pre-commit
 bash scripts/check-secrets.sh --all
 ```

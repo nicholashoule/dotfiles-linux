@@ -227,10 +227,45 @@ source "$1"
 BASH
 }
 
+# stub_manager DIR MODE writes a stand-in homeskillet into DIR for the homeskillet.sh
+# checks. Its completion command succeeds with a script that registers a
+# completion (ok), or prints code that must never run and fails (fail), or is
+# missing with an error, as in a homeskillet too old to have it (old).
+stub_manager() {
+    local dir=$1 mode=$2
+    mkdir -p "$dir"
+    case $mode in
+        ok)
+            cat >"$dir/homeskillet" <<'SH'
+#!/bin/sh
+[ "$1 $2" = 'completion bash' ] || exit 2
+printf '%s\n' '_homeskillet() { :; }' 'complete -o filenames -F _homeskillet homeskillet'
+SH
+            ;;
+        fail)
+            cat >"$dir/homeskillet" <<'SH'
+#!/bin/sh
+printf '%s\n' 'printf evaluated'
+exit 1
+SH
+            ;;
+        old)
+            cat >"$dir/homeskillet" <<'SH'
+#!/bin/sh
+echo 'homeskillet: unknown command "completion"' >&2
+exit 1
+SH
+            ;;
+    esac
+    chmod +x "$dir/homeskillet"
+}
+
 # Every file in home/.local/share/bash-completion/completions, sourced alone, registers
-# a completion for the command it is named after (less .bash) and prints nothing.
+# a completion for the command it is named after (less .bash) and prints nothing,
+# and passes ShellCheck when it is installed. The directory holds no files until a
+# shared completion is added, so the ShellCheck commands leave it to this check.
 check_completion_files() {
-    local home file name
+    local home file name output
     home=$(new_home)
     for file in "$REPO"/home/.local/share/bash-completion/completions/*; do
         [[ -f $file ]] || continue
@@ -240,59 +275,52 @@ check_completion_files() {
 source "$1"
 complete -p -- "$2" >/dev/null && printf registered
 BASH
+        if ! command -v shellcheck >/dev/null; then
+            skip "completion file for $name, ShellCheck" "shellcheck is not installed"
+            continue
+        fi
+        output=$(shellcheck -- "$file" 2>&1) || fail "completion file for $name, ShellCheck" "$output"
+        pass "completion file for $name passes ShellCheck"
     done
 }
 
-# The homeskillet completion offers commands, self subcommands, installed versions
-# from `homeskillet self list` (never expanding one that holds shell code), options
-# with one dash or two, platforms, and directories for path options, including the
-# -option=value form; positions that take files are left to file name completion.
+# homeskillet.sh loads the script homeskillet writes itself (homeskillet completion
+# bash) only when that command succeeds: a failing command's output never runs, and
+# a homeskillet too old to have the command, or none at all, leaves nothing
+# registered and prints nothing. Its helper variable is unset. Its interactive-only
+# guard is removed, because the sandbox shell is not interactive; with the guard,
+# a non-interactive shell loads nothing.
 check_homeskillet_completion() {
-    local home expected
+    local home mode expected
+    for mode in ok fail old none; do
+        home=$(new_home)
+        expected=''
+        if [[ $mode == ok ]]; then
+            expected='complete -o filenames -F _homeskillet homeskillet'
+        fi
+        if [[ $mode != none ]]; then
+            stub_manager "$home/bin" "$mode"
+        fi
+        expect "homeskillet.sh completion, generator $mode" "$expected" "$home" PATH="$home/bin" -- \
+            "$REPO/home/.bashrc.d/homeskillet.sh" "$SED_BIN" <<'BASH'
+source <("$2" 's/\[\[ \$- == \*i\* \]\] && //' "$1")
+complete -p homeskillet 2>/dev/null
+if [[ -v homeskillet_completion ]]; then printf ' helper variable left set'; fi
+BASH
+    done
     home=$(new_home)
-    mkdir -p "$home/work/alpha"
-    : >"$home/work/beta.txt"
-    expected='status link unlink setup self version|setup self|install list use remove'
-    expected+='|latest previous v0.2.0 v0.1.0|v0.1.0|--force'
-    expected+='|-allow-root -data-dir -dry-run -home -platform -repo -yes'
-    expected+='|alpha|alpha|alpha|linux linux/amd64 linux/arm64|status|||'
-    expect "homeskillet completion" "$expected" "$home" -- \
-        "$REPO/home/.local/share/bash-completion/completions/homeskillet.bash" "$home/work" <<'BASH'
+    stub_manager "$home/bin" ok
+    expect "homeskillet.sh completion, non-interactive" '' "$home" PATH="$home/bin" -- \
+        "$REPO/home/.bashrc.d/homeskillet.sh" <<'BASH'
 source "$1"
-cd "$2" || exit
-homeskillet() {
-    printf 'v0.2.0\tlatest, current\tcommit 1\n'
-    printf 'v0.1.0\t\tcommit 2\n'
-    printf '$(: >expanded)\t\tcommit 3\n'
-}
-try() {
-    COMP_WORDS=("$@")
-    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
-    _homeskillet homeskillet
-    printf '%s|' "${COMPREPLY[*]}"
-}
-try homeskillet ''
-try homeskillet se
-try homeskillet self ''
-try homeskillet self use ''
-try homeskillet self remove v0.1
-try homeskillet link --f
-try homeskillet setup -
-try homeskillet -repo ''
-try homeskillet -repo = ''
-try homeskillet --home =
-try homeskillet -platform l
-try homeskillet --repo alpha st
-try homeskillet version -
-try homeskillet status ''
-if [[ -e expanded ]]; then printf 'version list expanded'; fi
+complete -p homeskillet 2>/dev/null || :
 BASH
 }
 
 # With bash-completion installed, an interactive .bashrc loads it, and it loads a
-# completion from the user directory on first use: here the homeskillet file, linked
-# as homeskillet links it. An empty compatibility directory keeps out the system's
-# extra completion files, so the default handler is bash-completion's own.
+# completion from the user directory on first use: here a throwaway mytool.bash.
+# An empty compatibility directory keeps out the system's extra completion files,
+# so the default handler is bash-completion's own.
 check_completion_loading() {
     local home dir
     if [[ ! -r /usr/share/bash-completion/bash_completion && ! -r /etc/bash_completion ]]; then
@@ -302,18 +330,73 @@ check_completion_loading() {
     home=$(new_home)
     dir="$home/.local/share/bash-completion/completions"
     mkdir -p "$dir" "$home/compat"
-    ln -s "$REPO/home/.local/share/bash-completion/completions/homeskillet.bash" "$dir/homeskillet.bash"
+    printf '%s\n' '_mytool() { :; }' 'complete -o filenames -F _mytool mytool' >"$dir/mytool.bash"
     expect "bash-completion loads a user completion on first use" \
-        'loaded|124|complete -o default -F _homeskillet homeskillet' "$home" \
-        PATH=/usr/bin:/bin BASH_COMPLETION_COMPAT_DIR="$home/compat" -- "$REPO/home/.bashrc" "$SED_BIN" <<'BASH'
+        'loaded|124|complete -o filenames -F _mytool mytool' "$home" \
+        PATH="/usr/bin:/bin" BASH_COMPLETION_COMPAT_DIR="$home/compat" -- "$REPO/home/.bashrc" "$SED_BIN" <<'BASH'
 source <("$2" -n -e 's/\$- == \*i\* && //' -e '/^# User specific environment$/,$p' "$1")
 if [[ -n ${BASH_COMPLETION_VERSINFO-} ]]; then printf 'loaded|'; fi
-complete -p homeskillet 2>/dev/null
+complete -p mytool 2>/dev/null
 loader=$(complete -p -D)
 loader=${loader#*-F }
-"${loader%% *}" homeskillet '' homeskillet
+"${loader%% *}" mytool '' mytool
 printf '%s|' "$?"
-complete -p homeskillet
+complete -p mytool
+BASH
+}
+
+# .inputrc loads without a readline error, with the distribution's /etc/inputrc
+# where there is one, and turns on the completion list settings (readline 8.1 or
+# later). An ~/.inputrc.local in HOME loads last and wins. Loading it into a
+# non-interactive shell needs emacs mode, without which bind only warns.
+check_inputrc() {
+    local home
+    home=$(new_home)
+    expect ".inputrc settings" 'set colored-completion-prefix on|set colored-stats on|set visible-stats on|' \
+        "$home" -- "$REPO/home/.inputrc" <<'BASH'
+set -o emacs
+bind -f "$1"
+while IFS= read -r line; do
+    case $line in
+        'set colored-stats '* | 'set colored-completion-prefix '* | 'set visible-stats '*) printf '%s|' "$line" ;;
+    esac
+done < <(bind -v)
+BASH
+    printf 'set visible-stats off\n' >"$home/.inputrc.local"
+    expect ".inputrc loads ~/.inputrc.local last" 'set visible-stats off' "$home" -- "$REPO/home/.inputrc" <<'BASH'
+set -o emacs
+bind -f "$1"
+while IFS= read -r line; do
+    case $line in 'set visible-stats '*) printf '%s' "$line" ;; esac
+done < <(bind -v)
+BASH
+}
+
+# .bashrc appends the completion colors to LS_COLORS once, however often it runs,
+# after the distribution's entries so they win, sets just these when LS_COLORS
+# is unset, keeps LS_COLORS's export state, and leaves non-interactive shells
+# alone. Only that block of .bashrc runs, its interactive-only test replaced.
+check_completion_colors() {
+    local home colors
+    home=$(new_home)
+    colors='mi=00;33:*.readline-colored-completion-prefix=01;35'
+    expect ".bashrc completion colors" "di=01;34:mi=01;37;41:$colors|exported|$colors|unexported|di=01;34" \
+        "$home" -- "$REPO/home/.bashrc" "$SED_BIN" <<'BASH'
+rc=$1 sed=$2
+block() { "$sed" -n -e '/^# Completion list colors$/,/^fi$/p' "$rc"; }
+interactive() { source <(block | "$sed" 's/\[\[ \$- == \*i\* \]\]/true/'); }
+export LS_COLORS='di=01;34:mi=01;37;41:'
+interactive
+interactive
+printf '%s|' "$LS_COLORS"
+if [[ $(declare -p LS_COLORS) == 'declare -x '* ]]; then printf 'exported|'; fi
+unset LS_COLORS
+interactive
+printf '%s|' "$LS_COLORS"
+if [[ $(declare -p LS_COLORS) != 'declare -x '* ]]; then printf 'unexported|'; fi
+LS_COLORS='di=01;34'
+source <(block)
+printf '%s' "$LS_COLORS"
 BASH
 }
 
@@ -583,10 +666,13 @@ run_installer() {
 }
 
 # The install helpers ignore ~/.curlrc, download to a file before running
-# anything, stop on a failed download, and put files where they say. A stub curl
-# serves fake installers that log their arguments, so nothing is downloaded.
+# anything, stop on a failed download or one that is not a script, and put files
+# where they say. install-dotnet.sh turns its optional first argument into
+# --channel or --version, and rejects an unknown one, or one given with
+# --channel or --version, before downloading. A stub curl serves fake installers
+# that log their arguments, so nothing is downloaded.
 check_install_scripts() {
-    local home stubs status output
+    local home stubs status output pair
     home=$(new_home)
     stubs="$home/stubs"
     mkdir "$stubs"
@@ -615,6 +701,7 @@ STUB
 #!/usr/bin/env bash
 printf 'dotnet-install %s\n' "$*" >>"$LOG"
 STUB
+    printf '<html>Not Found</html>\n' >"$stubs/error-page.html"
     chmod +x "$stubs/curl"
 
     status=0
@@ -648,45 +735,103 @@ STUB
         -x $home/custom/dotnet-install.sh && ! -e $home/.dotnet ]] ||
         fail "install-dotnet.sh, --install-dir" "exit status $status: $output; log: $(<"$home/log")"
     pass "install-dotnet.sh honors a custom --install-dir"
+
+    home=$(new_home)
+    status=0
+    output=$(run_installer "$home" "$stubs" install-dotnet.sh CURL_SOURCE="$stubs/error-page.html") || status=$?
+    [[ $status -eq 1 && $output == *'is not a script'* && ! -e $home/log && ! -e $home/.dotnet ]] ||
+        fail "install-dotnet.sh, not a script" "exit status $status: $output"
+    pass "install-dotnet.sh refuses a download that is not a script"
+
+    # Each pair is a first argument and the options it becomes.
+    for pair in 'lts|--channel lts' '10|--channel 10.0' '10.0|--channel 10.0' '10.0.1xx|--channel 10.0.1xx' \
+        '10.0.100|--version 10.0.100' '10.0.100-rc.2.25502.107|--version 10.0.100-rc.2.25502.107'; do
+        home=$(new_home)
+        status=0
+        output=$(run_installer "$home" "$stubs" install-dotnet.sh CURL_SOURCE="$stubs/dotnet-installer.sh" \
+            -- "${pair%%|*}" --dry-run) || status=$?
+        [[ $status -eq 0 && $(<"$home/log") == "dotnet-install --install-dir $home/.dotnet ${pair#*|} --dry-run" ]] ||
+            fail "install-dotnet.sh ${pair%%|*}" "exit status $status: $output; log: $(<"$home/log")"
+    done
+    pass "install-dotnet.sh turns a release into --channel and a version into --version"
+
+    home=$(new_home)
+    for pair in '10.0.x|10.0.x is not a release or version' '10.0 --version 10.0.100|give 10.0 or --version, not both'; do
+        status=0
+        # shellcheck disable=SC2086 # the arguments are split on purpose
+        output=$(run_installer "$home" "$stubs" install-dotnet.sh CURL_SOURCE="$stubs/dotnet-installer.sh" \
+            -- ${pair%%|*}) || status=$?
+        [[ $status -eq 2 && $output == *"${pair#*|}"* && ! -e $home/log ]] ||
+            fail "install-dotnet.sh ${pair%%|*}" "exit status $status: $output"
+    done
+    pass "install-dotnet.sh rejects an unknown release, or one with --channel or --version, before downloading"
 }
 
-# run_init_gitconfig HOME [ARG...] prints the output of init-gitconfig.sh run with
-# HOME in an empty environment that holds only Git and the core utilities, and
-# returns its status. The real global Git config rules apply there, with HOME's.
+# run_init_gitconfig HOME TOOLS [ARG...] prints the output of init-gitconfig.sh run
+# with HOME in an empty environment whose PATH holds only the stub directories
+# TOOLS and the core utilities it needs, so the gpg, gh, and glab installed here
+# never change the result, and returns its status.
 run_init_gitconfig() {
-    local home=$1 git
-    shift
-    git=$(command -v git)
-    env -i HOME="$home" PATH="${git%/*}:/usr/bin:/bin" GIT_CONFIG_NOSYSTEM=1 \
+    local home=$1 tools=$2
+    shift 2
+    env -i HOME="$home" PATH="$tools:$TEST_ROOT/gitconfig/core" \
         "$BASH" "$REPO/home/.local/share/helpers/sh/init-gitconfig.sh" "$@" 2>&1
 }
 
-# init-gitconfig.sh creates a starter ~/.gitconfig that sets nothing, after which
-# `git config --global` writes there instead of the linked ~/.config/git/config.
-# It never changes an existing ~/.gitconfig or a symlink in its place, --dry-run
-# creates nothing, and an unknown argument is a usage error.
+# init-gitconfig.sh creates a starter ~/.gitconfig, after which `git config
+# --global` writes there instead of the linked ~/.config/git/config. The starter
+# sets nothing on a machine without a usable gpg secret key, gh, or glab, and
+# turns each on when it is ready, naming a tool by its path unless the path needs
+# quoting; gpg is never run without a GnuPG home. An existing ~/.gitconfig or a
+# symlink in its place is left unchanged unless --force moves it to an unused
+# backup name first. --dry-run changes nothing, and an unknown argument is a
+# usage error. Stubs stand in for gpg (listing the keys in HOME/keys), gh, glab,
+# and date (fixing the backup name).
 check_init_gitconfig() {
-    local home other output status git
+    local home other output status git dir cmd tools none spaced fixed expected backup
     if ! command -v git >/dev/null; then
         skip "init-gitconfig.sh" "git is not installed"
         return
     fi
     git=$(command -v git)
+    dir="$TEST_ROOT/gitconfig"
+    tools="$dir/tools"
+    none="$dir/none"
+    spaced="$dir/spaced tools"
+    fixed="$dir/fixed-date"
+    mkdir -p "$dir/core" "$tools" "$none" "$spaced" "$fixed"
+    for cmd in awk bash cat date mv; do
+        ln -s "$(command -v "$cmd")" "$dir/core/$cmd"
+    done
+    cat >"$tools/gpg" <<'STUB'
+#!/usr/bin/env bash
+printf 'gpg %s\n' "$*" >>"$HOME/gpg.log"
+cat "$HOME/keys" 2>/dev/null || true
+STUB
+    printf '#!/usr/bin/env bash\n' >"$tools/gh"
+    cp "$tools/gh" "$tools/glab"
+    cp "$tools/gh" "$spaced/gh"
+    printf '#!/usr/bin/env bash\nprintf "20260102-030405\\n"\n' >"$fixed/date"
+    chmod +x "$tools/gpg" "$tools/gh" "$tools/glab" "$spaced/gh" "$fixed/date"
+
     home=$(new_home)
     mkdir -p "$home/.config/git"
     cp "$REPO/home/.config/git/config" "$home/.config/git/config"
-
+    expected="Would create $home/.gitconfig with:
+  commit signing: off until gpg has a secret key
+  github.com and gist.github.com credentials: off; gh is not installed
+  gitlab.com credentials: off; glab is not installed"
     status=0
-    output=$(run_init_gitconfig "$home" --dry-run) || status=$?
-    [[ $status -eq 0 && $output == "Would create $home/.gitconfig." && ! -e $home/.gitconfig ]] ||
+    output=$(run_init_gitconfig "$home" "$none" --dry-run) || status=$?
+    [[ $status -eq 0 && $output == "$expected" && ! -e $home/.gitconfig ]] ||
         fail "init-gitconfig.sh --dry-run" "exit status $status: $output"
     status=0
-    output=$(run_init_gitconfig "$home" --bogus) || status=$?
+    output=$(run_init_gitconfig "$home" "$none" --bogus) || status=$?
     [[ $status -eq 2 && ! -e $home/.gitconfig ]] || fail "init-gitconfig.sh, usage" "exit status $status: $output"
     pass "init-gitconfig.sh --dry-run creates nothing, and a bad argument is a usage error"
 
     status=0
-    output=$(run_init_gitconfig "$home") || status=$?
+    output=$(run_init_gitconfig "$home" "$none") || status=$?
     [[ $status -eq 0 && -f $home/.gitconfig && ! -L $home/.gitconfig ]] ||
         fail "init-gitconfig.sh, create" "exit status $status: $output"
     output=$("$git" config --file "$home/.gitconfig" --list 2>&1) ||
@@ -697,21 +842,82 @@ check_init_gitconfig() {
         ! cmp -s "$REPO/home/.config/git/config" "$home/.config/git/config"; then
         fail "init-gitconfig.sh, create" "git config --global did not write to ~/.gitconfig"
     fi
-    pass "init-gitconfig.sh creates a starter ~/.gitconfig that git config --global writes to"
+    pass "init-gitconfig.sh creates a starter ~/.gitconfig, setting nothing without gpg keys, gh, or glab, that git config --global writes to"
+
+    other=$(new_home)
+    mkdir "$other/.gnupg"
+    printf 'sec:u:255:22:0123456789ABCDEF:1700000000:::u:::scESC:::+:::23::0:\n' >"$other/keys"
+    expected="commit.gpgsign=true
+gpg.program=$tools/gpg
+credential.https://github.com.helper=
+credential.https://github.com.helper=!$tools/gh auth git-credential
+credential.https://gist.github.com.helper=
+credential.https://gist.github.com.helper=!$tools/gh auth git-credential
+credential.https://gitlab.com.helper=
+credential.https://gitlab.com.helper=!$tools/glab auth git-credential"
+    status=0
+    output=$(run_init_gitconfig "$other" "$tools") || status=$?
+    [[ $status -eq 0 && $("$git" config --file "$other/.gitconfig" --list 2>&1) == "$expected" ]] ||
+        fail "init-gitconfig.sh, ready tools" "exit status $status: $output; file: $(cat "$other/.gitconfig")"
+    pass "init-gitconfig.sh turns on signing with a secret key, and gh and glab credentials when installed"
+
+    other=$(new_home)
+    mkdir "$other/.gnupg"
+    printf 'sec:e:255:22:0123456789ABCDEF:1600000000:1650000000::u:::scESC:::+:::23::0:\n' >"$other/keys"
+    expected="credential.https://github.com.helper=
+credential.https://github.com.helper=!gh auth git-credential
+credential.https://gist.github.com.helper=
+credential.https://gist.github.com.helper=!gh auth git-credential
+credential.https://gitlab.com.helper=
+credential.https://gitlab.com.helper=!$tools/glab auth git-credential"
+    status=0
+    output=$(run_init_gitconfig "$other" "$spaced:$tools") || status=$?
+    [[ $status -eq 0 && $("$git" config --file "$other/.gitconfig" --list 2>&1) == "$expected" ]] ||
+        fail "init-gitconfig.sh, expired key" "exit status $status: $output; file: $(cat "$other/.gitconfig")"
+    other=$(new_home)
+    status=0
+    output=$(run_init_gitconfig "$other" "$tools" --dry-run) || status=$?
+    [[ $status -eq 0 && $output == *'commit signing: off'* && ! -e $other/gpg.log ]] ||
+        fail "init-gitconfig.sh, no GnuPG home" "exit status $status: $output"
+    pass "init-gitconfig.sh skips an expired key, runs no gpg without a GnuPG home, and names a tool whose path needs quoting"
 
     cp "$home/.gitconfig" "$home/before"
     status=0
-    output=$(run_init_gitconfig "$home") || status=$?
-    if [[ $status -ne 0 || $output != *'exists; leaving it unchanged.' ]] || ! cmp -s "$home/before" "$home/.gitconfig"; then
+    output=$(run_init_gitconfig "$home" "$tools") || status=$?
+    if [[ $status -ne 0 || $output != *'exists; leaving it unchanged'* ]] || ! cmp -s "$home/before" "$home/.gitconfig"; then
         fail "init-gitconfig.sh, existing file" "exit status $status: $output"
     fi
     other=$(new_home)
     ln -s "$other/missing" "$other/.gitconfig"
     status=0
-    output=$(run_init_gitconfig "$other") || status=$?
+    output=$(run_init_gitconfig "$other" "$tools") || status=$?
     [[ $status -eq 0 && -L $other/.gitconfig && ! -e $other/missing ]] ||
         fail "init-gitconfig.sh, symlink" "exit status $status: $output"
     pass "init-gitconfig.sh leaves an existing ~/.gitconfig or a symlink unchanged"
+
+    backup="$home/.gitconfig.bak.20260102-030405"
+    status=0
+    output=$(run_init_gitconfig "$home" "$fixed" --dry-run --force) || status=$?
+    if [[ $status -ne 0 || $output != "Would move $home/.gitconfig to $backup."* || -e $backup ]] ||
+        ! cmp -s "$home/before" "$home/.gitconfig"; then
+        fail "init-gitconfig.sh --dry-run --force" "exit status $status: $output"
+    fi
+    : >"$backup"
+    status=0
+    output=$(run_init_gitconfig "$home" "$fixed" --force) || status=$?
+    if [[ $status -ne 0 || ! -f $home/.gitconfig || -n $("$git" config --file "$home/.gitconfig" --list 2>&1) ]] ||
+        ! cmp -s "$home/before" "$backup.1"; then
+        fail "init-gitconfig.sh --force" "exit status $status: $output"
+    fi
+    other=$(new_home)
+    printf '[user]\n\tname = Linked\n' >"$other/target"
+    ln -s "$other/target" "$other/.gitconfig"
+    status=0
+    output=$(run_init_gitconfig "$other" "$fixed" --force) || status=$?
+    [[ $status -eq 0 && -L $other/.gitconfig.bak.20260102-030405 && -f $other/.gitconfig && ! -L $other/.gitconfig &&
+        $(cat "$other/target") == *'name = Linked' ]] ||
+        fail "init-gitconfig.sh --force, symlink" "exit status $status: $output"
+    pass "init-gitconfig.sh --force moves the old file or symlink to an unused backup name, then writes a fresh starter"
 }
 
 # .bash_logout clears a virtual console as its outermost shell exits, with
@@ -978,7 +1184,7 @@ BASH
 # Link, relink, status, and unlink every file under home/ in an empty home, then
 # dry-run the setup steps.
 check_manager_integration() {
-    local home setup_home path state
+    local home setup_home completion_home path state
     local -a paths=()
     home=$(new_home)
     # The expected links are every file under home/, found the way homeskillet
@@ -1017,6 +1223,31 @@ check_manager_integration() {
     manage "$setup_home" setup --dry-run
     [[ -z $(ls -A "$setup_home") ]] || fail "setup --dry-run" "it changed the test home"
     pass "setup --dry-run succeeds and changes nothing"
+
+    # homeskillet.sh, its interactive-only guard removed, loads the manager's own
+    # completion, which completes its commands and this repository's setup step
+    # names; each name offered must be one dotfiles.json declares, so nothing here
+    # lists them.
+    completion_home=$(new_home)
+    mkdir -p "$completion_home/bin"
+    ln -s "$MANAGER" "$completion_home/bin/homeskillet"
+    expect "homeskillet completion through the manager" 'link|steps' "$completion_home" \
+        PATH="$completion_home/bin:/usr/bin:/bin" -- \
+        "$REPO/home/.bashrc.d/homeskillet.sh" "$REPO" "$SED_BIN" <<'BASH'
+source <("$3" 's/\[\[ \$- == \*i\* \]\] && //' "$1")
+complete_words() {
+    COMP_WORDS=("$@")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+    _homeskillet
+}
+complete_words homeskillet li
+printf '%s|' "${COMPREPLY[*]}"
+complete_words homeskillet setup --repo "$2" ''
+for step in "${COMPREPLY[@]}"; do
+    grep -q "\"name\": \"$step\"" "$2/dotfiles.json" || printf 'not a step: %s|' "$step"
+done
+if ((${#COMPREPLY[@]})); then printf steps; fi
+BASH
 }
 
 # Main entry point for the test script. Parses arguments, sets up the environment,
@@ -1046,6 +1277,8 @@ main() {
     check_completion_files
     check_homeskillet_completion
     check_completion_loading
+    check_inputrc
+    check_completion_colors
     check_aws_region
     check_telemetry_defaults
     check_history

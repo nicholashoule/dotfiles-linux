@@ -1,8 +1,9 @@
 # Git defaults shared across machines, installed as ~/.config/git/config.
 # https://git-scm.com/docs/git-config
 #
-# Git reads this file, then ~/.gitconfig, so ~/.gitconfig wins. Keep your name,
-# email, signing key, and credential helpers there, outside this repository:
+# Git reads this file, then ~/.gitconfig, so ~/.gitconfig wins and needs no
+# include of this file. Keep your name, email, signing key, and credential
+# helpers there, outside this repository:
 #   git config --global user.name 'Your Name'
 #   git config --global user.email you@example.com
 # `git config --global` writes to ~/.gitconfig only when that file exists, so the
