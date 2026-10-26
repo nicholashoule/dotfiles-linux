@@ -24,6 +24,11 @@
       "name": "dotnet-sdk",
       "run": ["bash", "home/.local/share/helpers/sh/install-dotnet.sh"],
       "creates": ".dotnet/dotnet"
+    },
+    {
+      "name": "vscode",
+      "run": ["bash", "home/.local/share/helpers/sh/install-vscode.sh"],
+      "provides": "code"
     }
   ]
 }

@@ -666,37 +666,56 @@ run_installer() {
 }
 
 # The install helpers ignore ~/.curlrc, download to a file before running
-# anything, stop on a failed download or one that is not a script, and put files
-# where they say. install-dotnet.sh turns its optional first argument into
-# --channel or --version, and rejects an unknown one, or one given with
-# --channel or --version, before downloading. A stub curl serves fake installers
-# that log their arguments, so nothing is downloaded.
+# anything, stop on a failed download, and put files where they say.
+# install-oh-my-posh.sh installs the binary for this CPU from the latest release
+# or the version given, only when its SHA-256 matches the release's
+# checksums.txt, replaces it with a rename, leaves a matching binary alone, and
+# refuses an unknown CPU, a bad version, or a missing tool before downloading.
+# install-dotnet.sh refuses a download that is not a script, turns its optional
+# first argument into --channel or --version, and rejects an unknown one, or one
+# given with --channel or --version, before downloading. A stub curl serves fake
+# files and logs each URL, and a stub uname names the CPU, so nothing is
+# downloaded.
 check_install_scripts() {
-    local home stubs status output pair
+    local home stubs status output pair fake_sum
     home=$(new_home)
     stubs="$home/stubs"
     mkdir "$stubs"
     cat >"$stubs/curl" <<'STUB'
 #!/usr/bin/env bash
-# Copies $CURL_SOURCE to the --output file, or fails like `curl --fail` on a 404.
-# --disable must come first, so the user's ~/.curlrc cannot change the download.
+# Logs the URL to ~/curl.log and copies $CURL_CHECKSUMS (for a checksums.txt
+# URL) or $CURL_SOURCE to the --output file, or fails like `curl --fail` on a
+# 404. --disable must come first, so the user's ~/.curlrc cannot change it.
 if [[ ${1-} != --disable ]]; then echo 'curl: called without --disable first' >&2; exit 2; fi
-out=''
+out='' url=''
 while [[ $# -gt 0 ]]; do
-    if [[ $1 == --output ]]; then out=$2; shift; fi
+    case $1 in
+        --output) out=$2; shift ;;
+        https://*) url=$1 ;;
+    esac
     shift
 done
+printf '%s\n' "$url" >>"$HOME/curl.log"
 if [[ -n ${CURL_FAIL-} ]]; then echo 'curl: (22) The requested URL returned error: 404' >&2; exit 22; fi
-cp "$CURL_SOURCE" "$out"
+case $url in
+    */checksums.txt) cp "$CURL_CHECKSUMS" "$out" ;;
+    *) cp "$CURL_SOURCE" "$out" ;;
+esac
 STUB
-    cat >"$stubs/omp-installer.sh" <<'STUB'
+    cat >"$stubs/uname" <<'STUB'
+#!/bin/sh
+case $1 in -m) echo "${UNAME_M:-x86_64}" ;; *) echo Linux ;; esac
+STUB
+    cat >"$stubs/posh-linux-amd64" <<'STUB'
 #!/usr/bin/env bash
-# Like the real installer, refuses a -d directory that does not exist.
-printf 'installer %s\n' "$*" >>"$LOG"
-[[ -d $2 ]] || exit 1
-printf '#!/usr/bin/env bash\nprintf "oh-my-posh %%s\\n" "$*" >>"$LOG"\n' >"$2/oh-my-posh"
-chmod +x "$2/oh-my-posh"
+printf 'oh-my-posh %s\n' "$*" >>"$LOG"
 STUB
+    fake_sum=$(sha256sum <"$stubs/posh-linux-amd64")
+    fake_sum=${fake_sum%% *}
+    printf '%064d  posh-linux-arm64\n%s  posh-linux-amd64\n' 1 "$fake_sum" >"$stubs/checksums.txt"
+    printf '%064d  posh-linux-amd64\n' 2 >"$stubs/bad-checksums.txt"
+    printf '%064d  posh-linux-arm64\n' 3 >"$stubs/other-checksums.txt"
+    chmod +x "$stubs/uname"
     cat >"$stubs/dotnet-installer.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'dotnet-install %s\n' "$*" >>"$LOG"
@@ -705,18 +724,54 @@ STUB
     chmod +x "$stubs/curl"
 
     status=0
-    output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/omp-installer.sh") ||
-        status=$?
-    [[ $status -eq 0 && $(<"$home/log") == "installer -d $home/.local/bin"$'\n'"oh-my-posh enable reload" ]] ||
-        fail "install-oh-my-posh.sh" "exit status $status: $output; log: $(<"$home/log")"
-    pass "install-oh-my-posh.sh creates ~/.local/bin, installs, and enables reload once"
+    output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+        CURL_CHECKSUMS="$stubs/checksums.txt") || status=$?
+    if [[ $status -ne 0 || $(<"$home/log") != 'oh-my-posh enable reload' || -e $home/.local/bin/.oh-my-posh.new ]] ||
+        [[ $(<"$home/curl.log") != *'/releases/latest/download/checksums.txt'$'\n'*'/releases/latest/download/posh-linux-amd64' ]] ||
+        ! cmp -s "$stubs/posh-linux-amd64" "$home/.local/bin/oh-my-posh" || [[ ! -x $home/.local/bin/oh-my-posh ]]; then
+        fail "install-oh-my-posh.sh" "exit status $status: $output; log: $(<"$home/log"); curl: $(<"$home/curl.log")"
+    fi
+    status=0
+    output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+        CURL_CHECKSUMS="$stubs/checksums.txt") || status=$?
+    [[ $status -eq 0 && $output == *'already'* && $(<"$home/log") == 'oh-my-posh enable reload' ]] ||
+        fail "install-oh-my-posh.sh, up to date" "exit status $status: $output; log: $(<"$home/log")"
+    pass "install-oh-my-posh.sh installs the checked latest binary, enables reload once, and leaves it alone after"
 
+    for pair in '31.9.1|v31.9.1' 'v31.9.1|v31.9.1'; do
+        home=$(new_home)
+        status=0
+        output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+            CURL_CHECKSUMS="$stubs/checksums.txt" -- "${pair%%|*}") || status=$?
+        [[ $status -eq 0 && $(<"$home/curl.log") == *"/releases/download/${pair#*|}/posh-linux-amd64" ]] ||
+            fail "install-oh-my-posh.sh ${pair%%|*}" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    done
+    pass "install-oh-my-posh.sh installs the version given"
+
+    for pair in 'bad-checksums.txt|does not match its checksum' 'other-checksums.txt|lists no checksum'; do
+        home=$(new_home)
+        status=0
+        output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+            CURL_CHECKSUMS="$stubs/${pair%%|*}") || status=$?
+        [[ $status -eq 1 && $output == *"${pair#*|}"* && ! -e $home/.local/bin/oh-my-posh && ! -e $home/log ]] ||
+            fail "install-oh-my-posh.sh, ${pair%%|*}" "exit status $status: $output"
+    done
     home=$(new_home)
     status=0
     output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_FAIL=1) || status=$?
-    [[ $status -ne 0 && $output == *'could not download'* && ! -e $home/log ]] ||
+    [[ $status -eq 1 && $output == *'could not download'* && ! -e $home/.local/bin/oh-my-posh && ! -e $home/log ]] ||
         fail "install-oh-my-posh.sh, failed download" "exit status $status: $output"
-    pass "install-oh-my-posh.sh stops on a failed download without running anything"
+    pass "install-oh-my-posh.sh installs nothing when the checksum is wrong or missing, or a download fails"
+
+    home=$(new_home)
+    for pair in 'UNAME_M=riscv64|1|no Linux build' 'UNAME_M=x86_64 -- 31.9|2|not a version' "PATH=$stubs|1|missing sha256sum"; do
+        status=0
+        # shellcheck disable=SC2086 # the variable and the arguments are split on purpose
+        output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh ${pair%%|*}) || status=$?
+        [[ $status -eq $(cut -d'|' -f2 <<<"$pair") && $output == *"${pair##*|}"* && ! -e $home/curl.log ]] ||
+            fail "install-oh-my-posh.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    pass "install-oh-my-posh.sh refuses an unknown CPU, a bad version, or a missing tool before downloading"
 
     home=$(new_home)
     status=0
@@ -765,6 +820,150 @@ STUB
             fail "install-dotnet.sh ${pair%%|*}" "exit status $status: $output"
     done
     pass "install-dotnet.sh rejects an unknown release, or one with --channel or --version, before downloading"
+}
+
+# run_vscode_installer HOME PACKAGER [VAR=value...] [-- ARG...] prints the
+# output of install-vscode.sh run with HOME, the stubs, the package manager stub
+# PACKAGER (dnf, apt-get, or none), and the core tools it needs on PATH, LOG and
+# its system root in HOME, and returns its status.
+run_vscode_installer() {
+    local home=$1 packager=$2 stubs="$TEST_ROOT/vscode"
+    local -a vars=()
+    shift 2
+    while [[ $# -gt 0 && $1 != -- ]]; do
+        vars+=("$1")
+        shift
+    done
+    [[ ${1-} != -- ]] || shift
+    env -i HOME="$home" PATH="$home/bin:$stubs/$packager:$stubs/common:$stubs/core" LOG="$home/log" \
+        INSTALL_VSCODE_ROOT="$home/root" ${vars[@]+"${vars[@]}"} \
+        "$BASH" "$REPO/home/.local/share/helpers/sh/install-vscode.sh" "$@" 2>&1
+}
+
+# install-vscode.sh adds Microsoft's repository and key only when no repository
+# file is there, runs only the system changes with sudo, installs code with dnf
+# or apt, and succeeds only when code runs afterward. It does nothing when code
+# is on PATH, and stops on a key that fails to download or is not a PGP key, on
+# a system with neither dnf nor apt-get, and on extra arguments. A stub sudo
+# logs each command and runs only `install`, into a test root; installing the
+# package puts a stub code on PATH unless NO_CODE is set.
+check_vscode_installer() {
+    local stubs="$TEST_ROOT/vscode" home status output tool log key
+    mkdir -p "$stubs/common" "$stubs/core" "$stubs/dnf" "$stubs/apt-get" "$stubs/none"
+    for tool in bash cat chmod cp head install mkdir mktemp rm; do
+        ln -s "$(command -v "$tool")" "$stubs/core/$tool"
+    done
+    key=$'-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey\n-----END PGP PUBLIC KEY BLOCK-----'
+    printf '%s\n' "$key" >"$stubs/key.asc"
+    printf '<html>Not Found</html>\n' >"$stubs/error-page.html"
+    cat >"$stubs/common/curl" <<'STUB'
+#!/usr/bin/env bash
+if [[ ${1-} != --disable ]]; then echo 'curl: called without --disable first' >&2; exit 2; fi
+out=''
+while [[ $# -gt 0 ]]; do
+    if [[ $1 == --output ]]; then out=$2; shift; fi
+    shift
+done
+printf 'curl\n' >>"$HOME/curl.log"
+if [[ -n ${CURL_FAIL-} ]]; then echo 'curl: (22) The requested URL returned error: 404' >&2; exit 22; fi
+cp "$CURL_SOURCE" "$out"
+STUB
+    cat >"$stubs/common/sudo" <<'STUB'
+#!/usr/bin/env bash
+printf 'sudo %s\n' "$*" >>"$LOG"
+case $1 in
+    install) "$@" ;;
+    dnf | apt-get)
+        if [[ $2 == install && -z ${NO_CODE-} ]]; then
+            mkdir -p "$HOME/bin"
+            printf '#!/usr/bin/env bash\necho 1.0.0\n' >"$HOME/bin/code"
+            chmod +x "$HOME/bin/code"
+        fi
+        ;;
+esac
+STUB
+    printf '#!/usr/bin/env bash\n' >"$stubs/dnf/dnf"
+    printf '#!/usr/bin/env bash\n' >"$stubs/apt-get/apt-get"
+    chmod +x "$stubs/common/curl" "$stubs/common/sudo" "$stubs/dnf/dnf" "$stubs/apt-get/apt-get"
+
+    home=$(new_home)
+    status=0
+    output=$(run_vscode_installer "$home" dnf CURL_SOURCE="$stubs/key.asc") || status=$?
+    log=$(<"$home/log")
+    if [[ $status -ne 0 || $output != *'Installed VS Code'* ]] ||
+        [[ $log != "sudo rpm --import "*"/microsoft.asc"$'\n'"sudo install -D -m 0644 -- "*"/vscode.repo $home/root/etc/yum.repos.d/vscode.repo"$'\n'"sudo dnf install code" ]] ||
+        [[ $(<"$home/root/etc/yum.repos.d/vscode.repo") != '[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc' ]]; then
+        fail "install-vscode.sh, dnf" "exit status $status: $output; log: $log"
+    fi
+    home=$(new_home)
+    mkdir -p "$home/root/etc/yum.repos.d"
+    : >"$home/root/etc/yum.repos.d/vscode.repo"
+    status=0
+    output=$(run_vscode_installer "$home" dnf CURL_SOURCE="$stubs/key.asc") || status=$?
+    [[ $status -eq 0 && $(<"$home/log") == 'sudo dnf install code' && ! -e $home/curl.log ]] ||
+        fail "install-vscode.sh, dnf with a repository" "exit status $status: $output; log: $(<"$home/log")"
+    pass "install-vscode.sh adds the repository and key with dnf only when missing, then installs code"
+
+    home=$(new_home)
+    status=0
+    output=$(run_vscode_installer "$home" apt-get CURL_SOURCE="$stubs/key.asc") || status=$?
+    log=$(<"$home/log")
+    if [[ $status -ne 0 || $(<"$home/root/usr/share/keyrings/microsoft-vscode.asc") != "$key" ]] ||
+        [[ $log != "sudo install -D -m 0644 -- "*"/microsoft.asc $home/root/usr/share/keyrings/microsoft-vscode.asc"$'\n'"sudo install -D -m 0644 -- "*"/vscode.sources $home/root/etc/apt/sources.list.d/vscode.sources"$'\n'"sudo apt-get update"$'\n'"sudo apt-get install code" ]] ||
+        [[ $(<"$home/root/etc/apt/sources.list.d/vscode.sources") != 'Types: deb
+URIs: https://packages.microsoft.com/repos/code
+Suites: stable
+Components: main
+Architectures: amd64,arm64,armhf
+Signed-By: /usr/share/keyrings/microsoft-vscode.asc' ]]; then
+        fail "install-vscode.sh, apt" "exit status $status: $output; log: $log"
+    fi
+    home=$(new_home)
+    mkdir -p "$home/root/etc/apt/sources.list.d"
+    : >"$home/root/etc/apt/sources.list.d/vscode.list"
+    status=0
+    output=$(run_vscode_installer "$home" apt-get CURL_SOURCE="$stubs/key.asc") || status=$?
+    [[ $status -eq 0 && $(<"$home/log") == $'sudo apt-get update\nsudo apt-get install code' && ! -e $home/curl.log ]] ||
+        fail "install-vscode.sh, apt with the package's repository" "exit status $status: $output; log: $(<"$home/log")"
+    pass "install-vscode.sh adds the repository and key with apt only when missing, then installs code"
+
+    home=$(new_home)
+    mkdir -p "$home/bin"
+    printf '#!/usr/bin/env bash\necho 1.0.0\n' >"$home/bin/code"
+    chmod +x "$home/bin/code"
+    status=0
+    output=$(run_vscode_installer "$home" dnf) || status=$?
+    [[ $status -eq 0 && $output == *'already installed'* && ! -e $home/log && ! -e $home/curl.log ]] ||
+        fail "install-vscode.sh, installed" "exit status $status: $output"
+    pass "install-vscode.sh does nothing when code is on PATH"
+
+    for pair in "CURL_SOURCE=$stubs/error-page.html|not a PGP public key" 'CURL_FAIL=1|could not download' \
+        "CURL_SOURCE=$stubs/key.asc NO_CODE=1|not available after the install"; do
+        home=$(new_home)
+        status=0
+        # shellcheck disable=SC2086 # the variables are split on purpose
+        output=$(run_vscode_installer "$home" dnf ${pair%%|*}) || status=$?
+        [[ $status -eq 1 && $output == *"${pair#*|}"* ]] || fail "install-vscode.sh, ${pair%%|*}" "exit status $status: $output"
+        if [[ $pair != *NO_CODE* && ( -e $home/log || -e $home/root/etc/yum.repos.d/vscode.repo ) ]]; then
+            fail "install-vscode.sh, ${pair%%|*}" "it changed the system: $(cat "$home/log" 2>&1)"
+        fi
+    done
+    home=$(new_home)
+    status=0
+    output=$(run_vscode_installer "$home" none CURL_SOURCE="$stubs/key.asc") || status=$?
+    [[ $status -eq 1 && $output == *'no dnf or apt-get'* && ! -e $home/log ]] ||
+        fail "install-vscode.sh, no package manager" "exit status $status: $output"
+    status=0
+    output=$(run_vscode_installer "$home" dnf -- extra) || status=$?
+    [[ $status -eq 2 && ! -e $home/log ]] || fail "install-vscode.sh, usage" "exit status $status: $output"
+    pass "install-vscode.sh stops on a bad or missing key, no package manager, no code afterward, or extra arguments"
 }
 
 # run_init_local HOME [ARG...] prints the output of init-local.sh run with HOME in
@@ -1307,6 +1506,58 @@ hgrep 'from memory'
 BASH
 }
 
+# code_settings_apply adds only the missing settings after the opening brace,
+# keeping a value you set and your comments, backs the file up once per change,
+# and changes nothing when all are there. An empty object takes no trailing
+# comma. It refuses a missing file and one whose first line is not {, and extra
+# arguments are a usage error.
+check_code_settings() {
+    local home expected
+    home=$(new_home)
+    mkdir -p "$home/.config/Code/User"
+    printf '%s\n' '{' '    // mine' '    "editor.fontSize": 14,' '    "extensions.ignoreRecommendations": false' '}' \
+        >"$home/.config/Code/User/settings.json"
+    expected='0|{
+    "telemetry.telemetryLevel": "off",
+    "extensions.showRecommendationsOnlyOnDemand": true,
+    // mine
+    "editor.fontSize": 14,
+    "extensions.ignoreRecommendations": false
+}
+|1|0|1|{
+    "telemetry.telemetryLevel": "off",
+    "extensions.ignoreRecommendations": true,
+    "extensions.showRecommendationsOnlyOnDemand": true
+}
+|1|1|{ "a": 1 }
+|2'
+    expect "code_settings_apply" "$expected" "$home" PATH=/usr/bin:/bin -- "$REPO/home/.bashrc.d/vscode.sh" <<'BASH'
+source "$1"
+shopt -s nullglob
+settings=$HOME/.config/Code/User/settings.json
+code_settings_apply >/dev/null
+printf '%s|' "$?"
+cat "$settings"
+backups=("$settings".bak.*)
+printf '|%s|' "${#backups[@]}"
+code_settings_apply >/dev/null
+printf '%s|' "$?"
+backups=("$settings".bak.*)
+printf '%s|' "${#backups[@]}"
+printf '{\n}\n' >"$HOME/empty.json"
+code_settings_apply "$HOME/empty.json" >/dev/null
+cat "$HOME/empty.json"
+code_settings_apply "$HOME/missing.json" 2>/dev/null
+printf '|%s|' "$?"
+printf '{ "a": 1 }\n' >"$HOME/inline.json"
+code_settings_apply "$HOME/inline.json" 2>/dev/null
+printf '%s|' "$?"
+cat "$HOME/inline.json"
+code_settings_apply a b 2>/dev/null
+printf '|%s' "$?"
+BASH
+}
+
 # Every helper names its author on an Author line under what it does.
 check_helper_headers() {
     local helper
@@ -1450,6 +1701,7 @@ main() {
     check_history_archive
     check_hgrep
     check_helper_headers
+    check_code_settings
     check_helpers_path
     check_gcloud_path
     check_dotnet_path
@@ -1459,6 +1711,7 @@ main() {
     check_install_scripts
     check_init_gitconfig
     check_init_local
+    check_vscode_installer
     check_theme_selection
     check_editor_configs
     check_tmux_status

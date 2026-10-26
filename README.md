@@ -22,7 +22,7 @@ manager's Go source, tests, and binaries live in the `homeskillet` repository.
 - **Helpers and setup steps:** a starter `~/.gitconfig` for your identity,
   commit signing, and GitHub and GitLab credentials, a commented `local.sh` for
   this machine's overrides, and reviewed installers for Oh My Posh, its font,
-  and the .NET SDK.
+  the .NET SDK, and VS Code.
 - **Safety:** a pre-commit hook, CI, and `.gitignore` rules that keep secrets
   and personal details out of this public repository, plus regression checks.
 
@@ -117,13 +117,19 @@ lists them without running anything.
 | --- | --- | --- |
 | `gitconfig` | [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh): a starter `~/.gitconfig` with commented examples, plus commit signing and the `gh` and `glab` credential helpers when the machine is ready for them | `~/.gitconfig` exists |
 | `local` | [init-local.sh](home/.local/share/helpers/sh/init-local.sh): a starter `~/.bashrc.d/local.sh` for this machine's own settings, holding only commented examples | `~/.bashrc.d/local.sh` exists |
-| `oh-my-posh` | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh): the official installer into `~/.local/bin`, then config auto-reload turned on once | `oh-my-posh` is on PATH or in `~/.local/bin` |
+| `oh-my-posh` | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh): the latest release's binary into `~/.local/bin`, checked against the release's SHA-256 checksums, then config auto-reload turned on once | `oh-my-posh` is on PATH or in `~/.local/bin` |
 | `meslo-nerd-font` | `oh-my-posh font install Meslo` | the font is in `~/.local/share/fonts` |
 | `dotnet-sdk` | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh): the latest LTS SDK into `~/.dotnet` | `~/.dotnet/dotnet` exists |
+| `vscode` | [install-vscode.sh](home/.local/share/helpers/sh/install-vscode.sh): VS Code and its `code` command from Microsoft's signed package repository with dnf or apt (needs sudo) | `code` is on PATH |
 
 The installers download from the internet, so read each step before approving
-it. The install helpers save the official installer to a file and stop if the
-download fails, instead of piping it into a shell.
+it. Nothing downloaded is piped into a shell: `install-dotnet.sh` saves
+Microsoft's installer to a file and runs it only if it is a script, and
+`install-oh-my-posh.sh` downloads the binary for this CPU from the GitHub
+release and installs it only if its SHA-256 matches the release's
+`checksums.txt`. Oh My Posh's own `install.sh` checks no checksum and also
+fetches its themes, which needs `unzip`; these dotfiles bring their own themes.
+Either helper stops if a download fails.
 
 Once linked, `install-dotnet.sh` is also a command of its own. Its optional
 first argument picks what to install: `LTS` or `STS`, a release such as `10.0`
@@ -153,7 +159,8 @@ repository; afterward they are ordinary commands:
 | [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh) | Creates a starter `~/.gitconfig` unless one exists, even as a symlink; `--force` renames an existing one to a timestamped backup and replaces it; `--dry-run` only reports |
 | [init-local.sh](home/.local/share/helpers/sh/init-local.sh) | Creates `~/.bashrc.d/local.sh`, readable only by you and holding only commented examples, unless one exists; `--force` renames an existing one to a timestamped backup and replaces it; `--dry-run` only reports |
 | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh) | Installs a .NET SDK with Microsoft's `dotnet-install.sh`: the latest LTS, or the release or version you name, into `~/.dotnet` unless told otherwise |
-| [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh) | Installs Oh My Posh into `~/.local/bin` and turns on config auto-reload |
+| [install-vscode.sh](home/.local/share/helpers/sh/install-vscode.sh) | Installs VS Code and its `code` command from Microsoft's signed package repository with dnf or apt (needs sudo), unless `code` is already there; succeeds only when `code --version` runs |
+| [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh) | Installs Oh My Posh from its GitHub release into `~/.local/bin`, the latest or the version given (`install-oh-my-posh.sh 31.9.1`), after checking the binary's SHA-256; leaves a matching binary alone; turns on config auto-reload |
 
 ## Layout
 
@@ -270,7 +277,7 @@ aliases, functions, completions, and the prompt load only in interactive shells.
 | [opentofu.sh](home/.bashrc.d/opentofu.sh) | — | `tofu` completion |
 | [python.sh](home/.bashrc.d/python.sh) | — | `uv` and `uvx` completion |
 | [terraform.sh](home/.bashrc.d/terraform.sh) | `CHECKPOINT_DISABLE=1`, so no checkpoint calls to HashiCorp | `terraform` completion |
-| [vscode.sh](home/.bashrc.d/vscode.sh) | — | `code_extensions_install` installs the listed extensions that are missing |
+| [vscode.sh](home/.bashrc.d/vscode.sh) | — | `code_extensions_install` installs the listed extensions that are missing; `code_settings_apply` adds telemetry off and the Recommended-section settings to an existing `settings.json` when missing, after its opening `{`, with a backup |
 
 `.bashrc` also sets `DO_NOT_TRACK=1`, a telemetry opt-out some tools honor. Go
 has no environment switch for telemetry, so `golang.sh` runs `go telemetry off`
@@ -599,25 +606,26 @@ logins that need no changes), when `.bash_logout` clears the screen, every
 completion file, that `homeskillet.sh` loads homeskillet's own completion only
 when it is generated successfully, the helper functions, the secret scan (with
 throwaway repositories and fake secrets), the pre-commit hook, the install
-scripts (with a stub `curl`, so nothing is downloaded), that the starter
-`~/.gitconfig` turns on signing and the `gh` and `glab` credential helpers only
-when each is ready (with stub `gpg`, `gh`, and `glab`), receives
-`git config --global`, and replaces a file only with `--force`, after backing it
-up, that `init-local.sh` writes a comments-only `local.sh` whose examples run
-and pass ShellCheck, and that every snippet stays silent when its tool is
-missing. When bash-completion is installed, it also checks that `.bashrc` loads
-it and that it loads a completion from the user directory on first use. It also
-checks that `.inputrc` loads without readline errors and turns on the completion
-list settings, that `~/.inputrc.local` loads last, and that `.bashrc` appends
-the completion colors to `LS_COLORS` once, keeping its export state, and only in
-interactive shells. When vim and tmux are installed, it loads `.vimrc` and
-`tmux.conf`, fails on any error, and checks vim's ruler, tmux's terminal title,
-and the red tab of a window running `sudo` or `su` (stand-ins named after them,
-so nothing runs as root). When Oh My Posh is installed, it renders every theme
-except `jandedobbeleer` and requires the date and time at the start of its top
-line; otherwise those checks are reported as skipped. It stops at the first
-failure and exits 0 when every check passes, 1 when a check fails, and 2 on a
-usage error.
+scripts (with stub `curl` and `uname` commands, so nothing is downloaded,
+including a binary that fails its checksum), that the starter `~/.gitconfig`
+turns on signing and the `gh` and `glab` credential helpers only when each is
+ready (with stub `gpg`, `gh`, and `glab`), receives `git config --global`, and
+replaces a file only with `--force`, after backing it up, that `init-local.sh`
+writes a comments-only `local.sh` whose examples run and pass ShellCheck, and
+that every snippet stays silent when its tool is missing. When bash-completion
+is installed, it also checks that `.bashrc` loads it and that it loads a
+completion from the user directory on first use. It also checks that `.inputrc`
+loads without readline errors and turns on the completion list settings, that
+`~/.inputrc.local` loads last, and that `.bashrc` appends the completion colors
+to `LS_COLORS` once, keeping its export state, and only in interactive shells.
+When vim and tmux are installed, it loads `.vimrc` and `tmux.conf`, fails on any
+error, and checks vim's ruler, tmux's terminal title, and the red tab of a
+window running `sudo` or `su` (stand-ins named after them, so nothing runs as
+root). When Oh My Posh is installed, it renders every theme except
+`jandedobbeleer` and requires the date and time at the start of its top line;
+otherwise those checks are reported as skipped. It stops at the first failure
+and exits 0 when every check passes, 1 when a check fails, and 2 on a usage
+error.
 
 ShellCheck needs no options, so it also works on a single file and in editor
 integrations. Sourced files have no shebang, so each one starts with a
