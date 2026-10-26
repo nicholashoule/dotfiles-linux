@@ -7,7 +7,8 @@
 export CLOUDSDK_SURVEY_DISABLE_PROMPTS=${CLOUDSDK_SURVEY_DISABLE_PROMPTS:-true}
 export CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=${CLOUDSDK_CORE_DISABLE_USAGE_REPORTING:-true}
 
-# Uncomment defaults to use them; values already set take precedence.
+# Uncomment defaults to use them on every machine, or set them in
+# ~/.bashrc.d/local.sh for this one; values already set take precedence.
 # export CLOUDSDK_CORE_PROJECT=${CLOUDSDK_CORE_PROJECT:-example-project}
 # export CLOUDSDK_COMPUTE_REGION=${CLOUDSDK_COMPUTE_REGION:-us-central1}
 # export CLOUDSDK_COMPUTE_ZONE=${CLOUDSDK_COMPUTE_ZONE:-us-central1-a}

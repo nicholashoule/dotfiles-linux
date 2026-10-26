@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # Python via uv
 # https://docs.astral.sh/uv/reference/environment/
-# Uncomment defaults to use them; values already set take precedence.
+# Uncomment defaults to use them on every machine, or set them in
+# ~/.bashrc.d/local.sh for this one; values already set take precedence.
 # uv's standalone installer and `uv tool install` use ~/.local/bin, which .bashrc
 # already adds to PATH;
 # run the uv installer with UV_NO_MODIFY_PATH=1 so it leaves .bashrc alone.

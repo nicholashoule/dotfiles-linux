@@ -29,11 +29,53 @@ __dotfiles_usage() {
 
 # Shell {{{
 # hgrep PATTERN
-# Searches the shell history for PATTERN, ignoring case.
+# Searches every saved command for PATTERN (a grep pattern), ignoring case, and
+# prints each match with the date and time it ran. It reads the history archive
+# (see history.sh), which keeps the commands the live history has dropped, or
+# the live history when there is no archive. A command saved without a time,
+# such as one from before timestamps were on, gets a blank one.
 hgrep() {
+    local line num kind text stamp='' stamp_num=-1
     [[ $# -gt 0 ]] || { __dotfiles_usage 'hgrep PATTERN'; return; }
     __dotfiles_require grep || return
-    history | grep -i -- "$*"
+    if [[ ! -r ${HISTARCHIVE-} ]]; then
+        history | grep -i -- "$*"
+        return
+    fi
+    # grep -n marks each match NUM: and the line before it (-B1) NUM-, so a
+    # timestamp line counts only when it sits right above its command. awk
+    # formats the times when it has strftime (gawk, mawk, BusyBox), far faster
+    # than the shell loop below for a pattern that matches many commands.
+    if command -v awk >/dev/null && awk 'BEGIN { strftime("%Y", 0) }' 2>/dev/null; then
+        grep -n -i -B1 -- "$*" "$HISTARCHIVE" | awk '
+            BEGIN { stamp_num = -1 }
+            $0 == "--" { next }
+            {
+                match($0, /^[0-9]+/)
+                num = substr($0, 1, RLENGTH) + 0
+                kind = substr($0, RLENGTH + 1, 1)
+                text = substr($0, RLENGTH + 2)
+            }
+            text ~ /^#[0-9]+$/ { stamp = substr(text, 2); stamp_num = num; next }
+            kind == ":" && stamp_num == num - 1 { print strftime("%Y-%m-%d %H:%M:%S", stamp) "  " text; next }
+            kind == ":" { printf "%19s  %s\n", "", text }'
+        return
+    fi
+    while IFS= read -r line; do
+        [[ $line == -- ]] && continue
+        num=${line%%[!0-9]*}
+        kind=${line:${#num}:1}
+        text=${line:${#num}+1}
+        if [[ $text =~ ^#[0-9]+$ ]]; then
+            stamp=${text#'#'} stamp_num=$num
+        elif [[ $kind == : ]]; then
+            if ((stamp_num == num - 1)); then
+                printf '%(%F %T)T  %s\n' "$stamp" "$text"
+            else
+                printf '%19s  %s\n' '' "$text"
+            fi
+        fi
+    done < <(grep -n -i -B1 -- "$*" "$HISTARCHIVE")
 }
 
 # paths

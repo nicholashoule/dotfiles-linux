@@ -6,7 +6,7 @@
 # Font: set the terminal to a Nerd Font (installed via: oh-my-posh font install meslo)
 # OHMYPOSH_THEME picks the theme: the name of a theme in ~/.config/oh-my-posh/themes
 # (without .omp.json; bubblesextra by default) or a path to any theme file. Set it
-# in a file that loads earlier, such as ~/.bashrc.d/local.sh, or export it first.
+# in ~/.bashrc.d/local.sh, which loads earlier, or export it first.
 # The generated prompt runs only if `oh-my-posh init` produced it successfully.
 # Config auto-reload is a saved setting, turned on once by
 # the install-oh-my-posh.sh helper (or `oh-my-posh enable reload`), not at each start.

@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # Golang
 # https://pkg.go.dev/cmd/go#hdr-Environment_variables
-# Uncomment defaults to use them; values already set take precedence.
+# Uncomment defaults to use them on every machine, or set them in
+# ~/.bashrc.d/local.sh for this one; values already set take precedence.
 # Exports override `go env -w`. Set GOBIN or GOPATH here or with `go env -w`;
 # exports from later .bashrc.d files come too late for the PATH step below.
 # export GOPATH=${GOPATH:-$HOME/go}

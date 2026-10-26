@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Install a .NET SDK for the current user with Microsoft's dotnet-install script.
+# Author: Nicholas Houle (https://github.com/nicholashoule)
 #
 # Usage: install-dotnet.sh [RELEASE | VERSION] [DOTNET-INSTALL OPTION...]
 #

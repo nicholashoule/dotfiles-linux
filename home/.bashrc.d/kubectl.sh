@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # kubectl
 # https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/
-# Uncomment defaults to use them; values already set take precedence.
+# Uncomment defaults to use them on every machine, or set them in
+# ~/.bashrc.d/local.sh for this one; values already set take precedence.
 # Kubeconfig files hold cluster credentials; keep them out of this repository.
 # export KUBECONFIG=${KUBECONFIG:-$HOME/.kube/config}  # colon-separated files are merged
 # export KUBE_EDITOR=${KUBE_EDITOR:-vim}

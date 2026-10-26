@@ -666,37 +666,56 @@ run_installer() {
 }
 
 # The install helpers ignore ~/.curlrc, download to a file before running
-# anything, stop on a failed download or one that is not a script, and put files
-# where they say. install-dotnet.sh turns its optional first argument into
-# --channel or --version, and rejects an unknown one, or one given with
-# --channel or --version, before downloading. A stub curl serves fake installers
-# that log their arguments, so nothing is downloaded.
+# anything, stop on a failed download, and put files where they say.
+# install-oh-my-posh.sh installs the binary for this CPU from the latest release
+# or the version given, only when its SHA-256 matches the release's
+# checksums.txt, replaces it with a rename, leaves a matching binary alone, and
+# refuses an unknown CPU, a bad version, or a missing tool before downloading.
+# install-dotnet.sh refuses a download that is not a script, turns its optional
+# first argument into --channel or --version, and rejects an unknown one, or one
+# given with --channel or --version, before downloading. A stub curl serves fake
+# files and logs each URL, and a stub uname names the CPU, so nothing is
+# downloaded.
 check_install_scripts() {
-    local home stubs status output pair
+    local home stubs status output pair fake_sum
     home=$(new_home)
     stubs="$home/stubs"
     mkdir "$stubs"
     cat >"$stubs/curl" <<'STUB'
 #!/usr/bin/env bash
-# Copies $CURL_SOURCE to the --output file, or fails like `curl --fail` on a 404.
-# --disable must come first, so the user's ~/.curlrc cannot change the download.
+# Logs the URL to ~/curl.log and copies $CURL_CHECKSUMS (for a checksums.txt
+# URL) or $CURL_SOURCE to the --output file, or fails like `curl --fail` on a
+# 404. --disable must come first, so the user's ~/.curlrc cannot change it.
 if [[ ${1-} != --disable ]]; then echo 'curl: called without --disable first' >&2; exit 2; fi
-out=''
+out='' url=''
 while [[ $# -gt 0 ]]; do
-    if [[ $1 == --output ]]; then out=$2; shift; fi
+    case $1 in
+        --output) out=$2; shift ;;
+        https://*) url=$1 ;;
+    esac
     shift
 done
+printf '%s\n' "$url" >>"$HOME/curl.log"
 if [[ -n ${CURL_FAIL-} ]]; then echo 'curl: (22) The requested URL returned error: 404' >&2; exit 22; fi
-cp "$CURL_SOURCE" "$out"
+case $url in
+    */checksums.txt) cp "$CURL_CHECKSUMS" "$out" ;;
+    *) cp "$CURL_SOURCE" "$out" ;;
+esac
 STUB
-    cat >"$stubs/omp-installer.sh" <<'STUB'
+    cat >"$stubs/uname" <<'STUB'
+#!/bin/sh
+case $1 in -m) echo "${UNAME_M:-x86_64}" ;; *) echo Linux ;; esac
+STUB
+    cat >"$stubs/posh-linux-amd64" <<'STUB'
 #!/usr/bin/env bash
-# Like the real installer, refuses a -d directory that does not exist.
-printf 'installer %s\n' "$*" >>"$LOG"
-[[ -d $2 ]] || exit 1
-printf '#!/usr/bin/env bash\nprintf "oh-my-posh %%s\\n" "$*" >>"$LOG"\n' >"$2/oh-my-posh"
-chmod +x "$2/oh-my-posh"
+printf 'oh-my-posh %s\n' "$*" >>"$LOG"
 STUB
+    fake_sum=$(sha256sum <"$stubs/posh-linux-amd64")
+    fake_sum=${fake_sum%% *}
+    printf '%064d  posh-linux-arm64\n%s  posh-linux-amd64\n' 1 "$fake_sum" >"$stubs/checksums.txt"
+    printf '%064d  posh-linux-amd64\n' 2 >"$stubs/bad-checksums.txt"
+    printf '%064d  posh-linux-arm64\n' 3 >"$stubs/other-checksums.txt"
+    chmod +x "$stubs/uname"
     cat >"$stubs/dotnet-installer.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'dotnet-install %s\n' "$*" >>"$LOG"
@@ -705,18 +724,54 @@ STUB
     chmod +x "$stubs/curl"
 
     status=0
-    output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/omp-installer.sh") ||
-        status=$?
-    [[ $status -eq 0 && $(<"$home/log") == "installer -d $home/.local/bin"$'\n'"oh-my-posh enable reload" ]] ||
-        fail "install-oh-my-posh.sh" "exit status $status: $output; log: $(<"$home/log")"
-    pass "install-oh-my-posh.sh creates ~/.local/bin, installs, and enables reload once"
+    output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+        CURL_CHECKSUMS="$stubs/checksums.txt") || status=$?
+    if [[ $status -ne 0 || $(<"$home/log") != 'oh-my-posh enable reload' || -e $home/.local/bin/.oh-my-posh.new ]] ||
+        [[ $(<"$home/curl.log") != *'/releases/latest/download/checksums.txt'$'\n'*'/releases/latest/download/posh-linux-amd64' ]] ||
+        ! cmp -s "$stubs/posh-linux-amd64" "$home/.local/bin/oh-my-posh" || [[ ! -x $home/.local/bin/oh-my-posh ]]; then
+        fail "install-oh-my-posh.sh" "exit status $status: $output; log: $(<"$home/log"); curl: $(<"$home/curl.log")"
+    fi
+    status=0
+    output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+        CURL_CHECKSUMS="$stubs/checksums.txt") || status=$?
+    [[ $status -eq 0 && $output == *'already'* && $(<"$home/log") == 'oh-my-posh enable reload' ]] ||
+        fail "install-oh-my-posh.sh, up to date" "exit status $status: $output; log: $(<"$home/log")"
+    pass "install-oh-my-posh.sh installs the checked latest binary, enables reload once, and leaves it alone after"
 
+    for pair in '31.9.1|v31.9.1' 'v31.9.1|v31.9.1'; do
+        home=$(new_home)
+        status=0
+        output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+            CURL_CHECKSUMS="$stubs/checksums.txt" -- "${pair%%|*}") || status=$?
+        [[ $status -eq 0 && $(<"$home/curl.log") == *"/releases/download/${pair#*|}/posh-linux-amd64" ]] ||
+            fail "install-oh-my-posh.sh ${pair%%|*}" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    done
+    pass "install-oh-my-posh.sh installs the version given"
+
+    for pair in 'bad-checksums.txt|does not match its checksum' 'other-checksums.txt|lists no checksum'; do
+        home=$(new_home)
+        status=0
+        output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_SOURCE="$stubs/posh-linux-amd64" \
+            CURL_CHECKSUMS="$stubs/${pair%%|*}") || status=$?
+        [[ $status -eq 1 && $output == *"${pair#*|}"* && ! -e $home/.local/bin/oh-my-posh && ! -e $home/log ]] ||
+            fail "install-oh-my-posh.sh, ${pair%%|*}" "exit status $status: $output"
+    done
     home=$(new_home)
     status=0
     output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh CURL_FAIL=1) || status=$?
-    [[ $status -ne 0 && $output == *'could not download'* && ! -e $home/log ]] ||
+    [[ $status -eq 1 && $output == *'could not download'* && ! -e $home/.local/bin/oh-my-posh && ! -e $home/log ]] ||
         fail "install-oh-my-posh.sh, failed download" "exit status $status: $output"
-    pass "install-oh-my-posh.sh stops on a failed download without running anything"
+    pass "install-oh-my-posh.sh installs nothing when the checksum is wrong or missing, or a download fails"
+
+    home=$(new_home)
+    for pair in 'UNAME_M=riscv64|1|no Linux build' 'UNAME_M=x86_64 -- 31.9|2|not a version' "PATH=$stubs|1|missing sha256sum"; do
+        status=0
+        # shellcheck disable=SC2086 # the variable and the arguments are split on purpose
+        output=$(run_installer "$home" "$stubs" install-oh-my-posh.sh ${pair%%|*}) || status=$?
+        [[ $status -eq $(cut -d'|' -f2 <<<"$pair") && $output == *"${pair##*|}"* && ! -e $home/curl.log ]] ||
+            fail "install-oh-my-posh.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    pass "install-oh-my-posh.sh refuses an unknown CPU, a bad version, or a missing tool before downloading"
 
     home=$(new_home)
     status=0
@@ -765,6 +820,388 @@ STUB
             fail "install-dotnet.sh ${pair%%|*}" "exit status $status: $output"
     done
     pass "install-dotnet.sh rejects an unknown release, or one with --channel or --version, before downloading"
+}
+
+# run_vscode_installer HOME PACKAGER [VAR=value...] [-- ARG...] prints the
+# output of install-vscode.sh run with HOME, the stubs, the package manager stub
+# PACKAGER (dnf, apt-get, or none), and the core tools it needs on PATH, LOG and
+# its system root in HOME, and returns its status.
+run_vscode_installer() {
+    local home=$1 packager=$2 stubs="$TEST_ROOT/vscode"
+    local -a vars=()
+    shift 2
+    while [[ $# -gt 0 && $1 != -- ]]; do
+        vars+=("$1")
+        shift
+    done
+    [[ ${1-} != -- ]] || shift
+    env -i HOME="$home" PATH="$home/bin:$stubs/$packager:$stubs/common:$stubs/core" LOG="$home/log" \
+        INSTALL_VSCODE_ROOT="$home/root" ${vars[@]+"${vars[@]}"} \
+        "$BASH" "$REPO/home/.local/share/helpers/sh/install-vscode.sh" "$@" 2>&1
+}
+
+# install-vscode.sh adds Microsoft's repository and key only when no repository
+# file is there, runs only the system changes with sudo, installs code with dnf
+# or apt, and succeeds only when code runs afterward. It does nothing when code
+# is on PATH, and stops on a key that fails to download or is not a PGP key, on
+# a system with neither dnf nor apt-get, and on extra arguments. A stub sudo
+# logs each command and runs only `install`, into a test root; installing the
+# package puts a stub code on PATH unless NO_CODE is set.
+check_vscode_installer() {
+    local stubs="$TEST_ROOT/vscode" home status output tool log key
+    mkdir -p "$stubs/common" "$stubs/core" "$stubs/dnf" "$stubs/apt-get" "$stubs/none"
+    for tool in bash cat chmod cp head install mkdir mktemp rm; do
+        ln -s "$(command -v "$tool")" "$stubs/core/$tool"
+    done
+    key=$'-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey\n-----END PGP PUBLIC KEY BLOCK-----'
+    printf '%s\n' "$key" >"$stubs/key.asc"
+    printf '<html>Not Found</html>\n' >"$stubs/error-page.html"
+    cat >"$stubs/common/curl" <<'STUB'
+#!/usr/bin/env bash
+if [[ ${1-} != --disable ]]; then echo 'curl: called without --disable first' >&2; exit 2; fi
+out=''
+while [[ $# -gt 0 ]]; do
+    if [[ $1 == --output ]]; then out=$2; shift; fi
+    shift
+done
+printf 'curl\n' >>"$HOME/curl.log"
+if [[ -n ${CURL_FAIL-} ]]; then echo 'curl: (22) The requested URL returned error: 404' >&2; exit 22; fi
+cp "$CURL_SOURCE" "$out"
+STUB
+    cat >"$stubs/common/sudo" <<'STUB'
+#!/usr/bin/env bash
+printf 'sudo %s\n' "$*" >>"$LOG"
+case $1 in
+    install) "$@" ;;
+    dnf | apt-get)
+        if [[ $2 == install && -z ${NO_CODE-} ]]; then
+            mkdir -p "$HOME/bin"
+            printf '#!/usr/bin/env bash\necho 1.0.0\n' >"$HOME/bin/code"
+            chmod +x "$HOME/bin/code"
+        fi
+        ;;
+esac
+STUB
+    printf '#!/usr/bin/env bash\n' >"$stubs/dnf/dnf"
+    printf '#!/usr/bin/env bash\n' >"$stubs/apt-get/apt-get"
+    chmod +x "$stubs/common/curl" "$stubs/common/sudo" "$stubs/dnf/dnf" "$stubs/apt-get/apt-get"
+
+    home=$(new_home)
+    status=0
+    output=$(run_vscode_installer "$home" dnf CURL_SOURCE="$stubs/key.asc") || status=$?
+    log=$(<"$home/log")
+    if [[ $status -ne 0 || $output != *'Installed VS Code'* ]] ||
+        [[ $log != "sudo rpm --import "*"/microsoft.asc"$'\n'"sudo install -D -m 0644 -- "*"/vscode.repo $home/root/etc/yum.repos.d/vscode.repo"$'\n'"sudo dnf install code" ]] ||
+        [[ $(<"$home/root/etc/yum.repos.d/vscode.repo") != '[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc' ]]; then
+        fail "install-vscode.sh, dnf" "exit status $status: $output; log: $log"
+    fi
+    home=$(new_home)
+    mkdir -p "$home/root/etc/yum.repos.d"
+    : >"$home/root/etc/yum.repos.d/vscode.repo"
+    status=0
+    output=$(run_vscode_installer "$home" dnf CURL_SOURCE="$stubs/key.asc") || status=$?
+    [[ $status -eq 0 && $(<"$home/log") == 'sudo dnf install code' && ! -e $home/curl.log ]] ||
+        fail "install-vscode.sh, dnf with a repository" "exit status $status: $output; log: $(<"$home/log")"
+    pass "install-vscode.sh adds the repository and key with dnf only when missing, then installs code"
+
+    home=$(new_home)
+    status=0
+    output=$(run_vscode_installer "$home" apt-get CURL_SOURCE="$stubs/key.asc") || status=$?
+    log=$(<"$home/log")
+    if [[ $status -ne 0 || $(<"$home/root/usr/share/keyrings/microsoft-vscode.asc") != "$key" ]] ||
+        [[ $log != "sudo install -D -m 0644 -- "*"/microsoft.asc $home/root/usr/share/keyrings/microsoft-vscode.asc"$'\n'"sudo install -D -m 0644 -- "*"/vscode.sources $home/root/etc/apt/sources.list.d/vscode.sources"$'\n'"sudo apt-get update"$'\n'"sudo apt-get install code" ]] ||
+        [[ $(<"$home/root/etc/apt/sources.list.d/vscode.sources") != 'Types: deb
+URIs: https://packages.microsoft.com/repos/code
+Suites: stable
+Components: main
+Architectures: amd64,arm64,armhf
+Signed-By: /usr/share/keyrings/microsoft-vscode.asc' ]]; then
+        fail "install-vscode.sh, apt" "exit status $status: $output; log: $log"
+    fi
+    home=$(new_home)
+    mkdir -p "$home/root/etc/apt/sources.list.d"
+    : >"$home/root/etc/apt/sources.list.d/vscode.list"
+    status=0
+    output=$(run_vscode_installer "$home" apt-get CURL_SOURCE="$stubs/key.asc") || status=$?
+    [[ $status -eq 0 && $(<"$home/log") == $'sudo apt-get update\nsudo apt-get install code' && ! -e $home/curl.log ]] ||
+        fail "install-vscode.sh, apt with the package's repository" "exit status $status: $output; log: $(<"$home/log")"
+    pass "install-vscode.sh adds the repository and key with apt only when missing, then installs code"
+
+    home=$(new_home)
+    mkdir -p "$home/bin"
+    printf '#!/usr/bin/env bash\necho 1.0.0\n' >"$home/bin/code"
+    chmod +x "$home/bin/code"
+    status=0
+    output=$(run_vscode_installer "$home" dnf) || status=$?
+    [[ $status -eq 0 && $output == *'already installed'* && ! -e $home/log && ! -e $home/curl.log ]] ||
+        fail "install-vscode.sh, installed" "exit status $status: $output"
+    pass "install-vscode.sh does nothing when code is on PATH"
+
+    for pair in "CURL_SOURCE=$stubs/error-page.html|not a PGP public key" 'CURL_FAIL=1|could not download' \
+        "CURL_SOURCE=$stubs/key.asc NO_CODE=1|not available after the install"; do
+        home=$(new_home)
+        status=0
+        # shellcheck disable=SC2086 # the variables are split on purpose
+        output=$(run_vscode_installer "$home" dnf ${pair%%|*}) || status=$?
+        [[ $status -eq 1 && $output == *"${pair#*|}"* ]] || fail "install-vscode.sh, ${pair%%|*}" "exit status $status: $output"
+        if [[ $pair != *NO_CODE* && ( -e $home/log || -e $home/root/etc/yum.repos.d/vscode.repo ) ]]; then
+            fail "install-vscode.sh, ${pair%%|*}" "it changed the system: $(cat "$home/log" 2>&1)"
+        fi
+    done
+    home=$(new_home)
+    status=0
+    output=$(run_vscode_installer "$home" none CURL_SOURCE="$stubs/key.asc") || status=$?
+    [[ $status -eq 1 && $output == *'no dnf or apt-get'* && ! -e $home/log ]] ||
+        fail "install-vscode.sh, no package manager" "exit status $status: $output"
+    status=0
+    output=$(run_vscode_installer "$home" dnf -- extra) || status=$?
+    [[ $status -eq 2 && ! -e $home/log ]] || fail "install-vscode.sh, usage" "exit status $status: $output"
+    pass "install-vscode.sh stops on a bad or missing key, no package manager, no code afterward, or extra arguments"
+}
+
+# run_go_installer HOME [VAR=value...] [-- ARG...] prints the output of
+# install-go.sh run with HOME, the stub curl and uname, and the core tools it
+# needs on PATH, and returns its status.
+run_go_installer() {
+    local home=$1 stubs="$TEST_ROOT/go"
+    local -a vars=()
+    shift
+    while [[ $# -gt 0 && $1 != -- ]]; do
+        vars+=("$1")
+        shift
+    done
+    [[ ${1-} != -- ]] || shift
+    env -i HOME="$home" PATH="$stubs/bin:$stubs/core" CURL_LIST="$stubs/releases.json" CURL_FILES="$stubs" \
+        ${vars[@]+"${vars[@]}"} "$BASH" "$REPO/home/.local/share/helpers/sh/install-go.sh" "$@" 2>&1
+}
+
+# go_archive DIR VERSION writes DIR/VERSION.linux-amd64.tar.gz, a fake toolchain
+# whose go prints VERSION for `go env GOVERSION`, and prints its SHA-256.
+go_archive() {
+    local dir=$1 version=$2 sum
+    rm -rf "$dir/tree"
+    mkdir -p "$dir/tree/go/bin"
+    printf '%s\ntime 2026-01-01T00:00:00Z\n' "$version" >"$dir/tree/go/VERSION"
+    printf '#!/usr/bin/env bash\nif [[ $* == "env GOVERSION" ]]; then echo %s; fi\n' "$version" >"$dir/tree/go/bin/go"
+    printf '#!/usr/bin/env bash\n' >"$dir/tree/go/bin/gofmt"
+    chmod +x "$dir/tree/go/bin/go" "$dir/tree/go/bin/gofmt"
+    tar -czf "$dir/$version.linux-amd64.tar.gz" -C "$dir/tree" go
+    sum=$(sha256sum <"$dir/$version.linux-amd64.tar.gz")
+    printf '%s\n' "${sum%% *}"
+}
+
+# go_release VERSION SUM prints a release entry for go.dev's JSON list, with a
+# source file and a linux-amd64 archive, formatted as go.dev formats it.
+go_release() {
+    printf ' {\n  "version": "%s",\n  "stable": true,\n  "files": [\n' "$1"
+    printf '   {\n    "filename": "%s.src.tar.gz",\n    "version": "%s",\n    "sha256": "%064d",\n    "kind": "source"\n   },\n' "$1" "$1" 0
+    printf '   {\n    "filename": "%s.linux-amd64.tar.gz",\n    "os": "linux",\n    "arch": "amd64",\n    "version": "%s",\n    "sha256": "%s",\n    "kind": "archive"\n   }\n  ]\n }' "$1" "$1" "$2"
+}
+
+# install-go.sh installs the newest patch of the release one behind the latest,
+# the latest with --latest, or the version given (found in the full list), only
+# when its SHA-256 matches go.dev's list, swaps it in beside the old one, links
+# go and gofmt into ~/.local/bin, and leaves a toolchain at that version alone.
+# It refuses a wrong checksum, a version the list lacks, an install directory
+# that is not a Go toolchain, a bad argument, an unknown CPU, or a missing tool,
+# changing nothing, and leaves a go in ~/.local/bin that is not its link alone.
+# A stub curl serves the list and the archives and logs each URL.
+check_go_installer() {
+    local stubs="$TEST_ROOT/go" home status output tool latest previous patched older pair
+    mkdir -p "$stubs/bin" "$stubs/core"
+    for tool in awk bash cp dirname grep gzip head ln mkdir mktemp mv readlink rm sha256sum tar uniq; do
+        ln -s "$(command -v "$tool")" "$stubs/core/$tool"
+    done
+    cat >"$stubs/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+if [[ ${1-} != --disable ]]; then echo 'curl: called without --disable first' >&2; exit 2; fi
+out='' url=''
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --output) out=$2; shift ;;
+        https://*) url=$1 ;;
+    esac
+    shift
+done
+printf '%s\n' "$url" >>"$HOME/curl.log"
+case $url in
+    *'?mode=json'*) cp "$CURL_LIST" "$out" ;;
+    *) cp "$CURL_FILES/${url##*/}" "$out" 2>/dev/null || { echo 'curl: (22) 404' >&2; exit 22; } ;;
+esac
+STUB
+    cat >"$stubs/bin/uname" <<'STUB'
+#!/bin/sh
+case $1 in -m) echo "${UNAME_M:-x86_64}" ;; *) echo Linux ;; esac
+STUB
+    chmod +x "$stubs/bin/curl" "$stubs/bin/uname"
+    latest=$(go_archive "$stubs" go1.27.3)
+    previous=$(go_archive "$stubs" go1.26.10)
+    older=$(go_archive "$stubs" go1.25.0)
+    patched=$(go_archive "$stubs" go1.26.11)
+    { printf '[\n'; go_release go1.27.3 "$latest"; printf ',\n'; go_release go1.26.10 "$previous"; printf ',\n'
+        go_release go1.25.0 "$older"; printf '\n]\n'; } >"$stubs/releases.json"
+    { printf '[\n'; go_release go1.27.3 "$latest"; printf ',\n'; go_release go1.26.10 "$(printf '%064d' 1)"
+        printf '\n]\n'; } >"$stubs/bad-releases.json"
+    { printf '[\n'; go_release go1.27.3 "$latest"; printf ',\n'; go_release go1.26.11 "$patched"
+        printf '\n]\n'; } >"$stubs/patched-releases.json"
+
+    home=$(new_home)
+    status=0
+    output=$(run_go_installer "$home") || status=$?
+    if [[ $status -ne 0 || $output != *'Installed go1.26.10'* ]] ||
+        [[ $(<"$home/curl.log") != $'https://go.dev/dl/?mode=json\nhttps://go.dev/dl/go1.26.10.linux-amd64.tar.gz' ]] ||
+        [[ $(head -n 1 "$home/.local/share/go/VERSION") != go1.26.10 ]] ||
+        [[ $(readlink "$home/.local/bin/go") != "$home/.local/share/go/bin/go" ]] ||
+        [[ $(readlink "$home/.local/bin/gofmt") != "$home/.local/share/go/bin/gofmt" ]]; then
+        fail "install-go.sh" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    fi
+    status=0
+    output=$(run_go_installer "$home") || status=$?
+    [[ $status -eq 0 && $output == *'already installed'* && $(grep -c 'tar.gz' "$home/curl.log") -eq 1 ]] ||
+        fail "install-go.sh, up to date" "exit status $status: $output"
+    status=0
+    output=$(run_go_installer "$home" CURL_LIST="$stubs/patched-releases.json") || status=$?
+    [[ $status -eq 0 && $output == *'Installed go1.26.11'* && $(head -n 1 "$home/.local/share/go/VERSION") == go1.26.11 &&
+        $(ls -A "$home/.local/share") == go ]] ||
+        fail "install-go.sh, new patch" "exit status $status: $output; $(ls -A "$home/.local/share")"
+    pass "install-go.sh installs the newest patch one release behind, links go and gofmt, keeps it, and moves to a new patch"
+
+    status=0
+    output=$(run_go_installer "$home" -- --latest) || status=$?
+    [[ $status -eq 0 && $(head -n 1 "$home/.local/share/go/VERSION") == go1.27.3 &&
+        $(ls -A "$home/.local/share") == go && -L $home/.local/bin/go ]] ||
+        fail "install-go.sh --latest" "exit status $status: $output; $(ls -A "$home/.local/share")"
+    status=0
+    output=$(run_go_installer "$home" -- 1.25.0) || status=$?
+    [[ $status -eq 0 && $(head -n 1 "$home/.local/share/go/VERSION") == go1.25.0 &&
+        $(tail -n 2 "$home/curl.log") == $'https://go.dev/dl/?mode=json&include=all\nhttps://go.dev/dl/go1.25.0.linux-amd64.tar.gz' ]] ||
+        fail "install-go.sh 1.25.0" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    pass "install-go.sh installs the latest with --latest or the version given, replacing the old toolchain"
+
+    for pair in "CURL_LIST=$stubs/bad-releases.json|does not match its checksum" '-- 1.99.0|has no go1.99.0.linux-amd64.tar.gz'; do
+        status=0
+        # shellcheck disable=SC2086 # the variable and the arguments are split on purpose
+        output=$(run_go_installer "$home" ${pair%%|*}) || status=$?
+        [[ $status -eq 1 && $output == *"${pair#*|}"* && $(head -n 1 "$home/.local/share/go/VERSION") == go1.25.0 ]] ||
+            fail "install-go.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    home=$(new_home)
+    mkdir -p "$home/mine"
+    : >"$home/mine/notes"
+    status=0
+    output=$(run_go_installer "$home" GO_INSTALL_DIR="$home/mine") || status=$?
+    [[ $status -eq 1 && $output == *'is not a Go toolchain'* && $(ls -A "$home/mine") == notes && ! -e $home/curl.log ]] ||
+        fail "install-go.sh, not a toolchain" "exit status $status: $output"
+    pass "install-go.sh changes nothing on a wrong checksum, a missing version, or a directory that is not Go"
+
+    home=$(new_home)
+    mkdir -p "$home/.local/bin"
+    printf 'mine\n' >"$home/.local/bin/go"
+    status=0
+    output=$(run_go_installer "$home") || status=$?
+    [[ $status -eq 0 && $output == *'left'*'/.local/bin/go alone'* && $(<"$home/.local/bin/go") == mine &&
+        -L $home/.local/bin/gofmt ]] || fail "install-go.sh, own go" "exit status $status: $output"
+    pass "install-go.sh leaves a go in ~/.local/bin that is not its link alone"
+
+    home=$(new_home)
+    for pair in '-- --newest|2|not --latest or a version' 'UNAME_M=riscv64|1|no Linux build' \
+        "PATH=$stubs/bin|1|missing"; do
+        status=0
+        # shellcheck disable=SC2086 # the variable and the arguments are split on purpose
+        output=$(run_go_installer "$home" ${pair%%|*}) || status=$?
+        [[ $status -eq $(cut -d'|' -f2 <<<"$pair") && $output == *"${pair##*|}"* && ! -e $home/curl.log ]] ||
+            fail "install-go.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    pass "install-go.sh refuses a bad argument, an unknown CPU, or a missing tool before downloading"
+}
+
+# run_init_local HOME [ARG...] prints the output of init-local.sh run with HOME in
+# an empty environment holding only the core utilities, and returns its status.
+run_init_local() {
+    local home=$1
+    shift
+    env -i HOME="$home" PATH=/usr/bin:/bin "$BASH" "$REPO/home/.local/share/helpers/sh/init-local.sh" "$@" 2>&1
+}
+
+# init-local.sh creates ~/.bashrc.d/local.sh, readable only by you and holding
+# only comments, so it changes nothing until a line is uncommented. Each example,
+# uncommented, runs silently, adds its PATH entry once however often the file
+# runs, and passes ShellCheck. An existing file is left alone unless --force
+# moves it to a backup first; a symlinked ~/.bashrc.d is never written through;
+# --dry-run creates nothing, and an unknown argument is a usage error.
+check_init_local() {
+    local home other file output status examples
+    local -a backups
+    home=$(new_home)
+    file="$home/.bashrc.d/local.sh"
+    status=0
+    output=$(run_init_local "$home" --dry-run) || status=$?
+    [[ $status -eq 0 && $output == "Would create $file." && ! -e $home/.bashrc.d ]] ||
+        fail "init-local.sh --dry-run" "exit status $status: $output"
+    status=0
+    output=$(run_init_local "$home" --bogus) || status=$?
+    [[ $status -eq 2 && ! -e $file ]] || fail "init-local.sh, usage" "exit status $status: $output"
+    pass "init-local.sh --dry-run creates nothing, and a bad argument is a usage error"
+
+    status=0
+    output=$(run_init_local "$home") || status=$?
+    [[ $status -eq 0 && -f $file && $(ls -l "$file") == '-rw-------'* ]] ||
+        fail "init-local.sh, create" "exit status $status: $output; $(ls -l "$file" 2>&1)"
+    if grep -q -v -E '^(#|$)' "$file"; then
+        fail "init-local.sh, create" "the starter sets something: $(grep -v -E '^(#|$)' "$file")"
+    fi
+    pass "init-local.sh creates ~/.bashrc.d/local.sh with only comments, readable only by you"
+
+    examples="$home/examples.sh"
+    "$SED_BIN" -E 's/^# ((export |alias |case |[A-Z_]+\+?=).*)$/\1/' "$file" >"$examples"
+    grep -q -v -E '^(#|$)' "$examples" || fail "init-local.sh, examples" "nothing to uncomment"
+    expect "init-local.sh examples run silently and add PATH once" 1 "$home" -- "$examples" <<'BASH'
+source "$1"
+source "$1"
+count=0
+IFS=: read -ra parts <<<"$PATH"
+for part in "${parts[@]}"; do
+    if [[ $part == "$HOME/opt/tool/bin" ]]; then count=$((count + 1)); fi
+done
+printf '%s' "$count"
+BASH
+    if command -v shellcheck >/dev/null; then
+        output=$(shellcheck -- "$file" 2>&1) || fail "init-local.sh, ShellCheck" "$output"
+        # oh-my-posh.sh reads OHMYPOSH_THEME, so it looks unused on its own here.
+        output=$(shellcheck -s bash -e SC2034 -- "$examples" 2>&1) || fail "init-local.sh, ShellCheck" "$output"
+        pass "init-local.sh starter and its uncommented examples pass ShellCheck"
+    else
+        skip "init-local.sh, ShellCheck" "shellcheck is not installed"
+    fi
+
+    cp "$file" "$home/starter"
+    printf 'OHMYPOSH_THEME=emodipt\n' >"$file"
+    status=0
+    output=$(run_init_local "$home") || status=$?
+    [[ $status -eq 0 && $output == *'exists; leaving it unchanged'* && $(<"$file") == 'OHMYPOSH_THEME=emodipt' ]] ||
+        fail "init-local.sh, existing file" "exit status $status: $output"
+    status=0
+    output=$(run_init_local "$home" --force) || status=$?
+    backups=("$file".bak.*)
+    if [[ $status -ne 0 || ${#backups[@]} -ne 1 || ! -f ${backups[0]} ]] ||
+        [[ $(<"${backups[0]}") != 'OHMYPOSH_THEME=emodipt' ]] || ! cmp -s "$home/starter" "$file"; then
+        fail "init-local.sh --force" "exit status $status: $output"
+    fi
+    other=$(new_home)
+    mkdir "$other/target"
+    ln -s "$other/target" "$other/.bashrc.d"
+    status=0
+    output=$(run_init_local "$other") || status=$?
+    [[ $status -eq 1 && $output == *'is a symlink'* && -z $(ls -A "$other/target") ]] ||
+        fail "init-local.sh, symlinked directory" "exit status $status: $output"
+    pass "init-local.sh keeps an existing file unless --force backs it up, and never writes through a symlink"
 }
 
 # run_init_gitconfig HOME TOOLS [ARG...] prints the output of init-gitconfig.sh run
@@ -1126,14 +1563,14 @@ check_tmux_status() {
     pass "tmux turns a window's tab red while a pane runs sudo or su"
 }
 
-# history.sh sets the history options and adds `history -a` to PROMPT_COMMAND as
-# an entry of its own, once, even when sourced twice: after a plain string and
-# after an array such as oh-my-posh's, whose entries must stay untouched.
+# history.sh sets the history options and adds its save to PROMPT_COMMAND as an
+# entry of its own, once, even when sourced twice: after a plain string and after
+# an array such as oh-my-posh's, whose entries must stay untouched.
 check_history() {
     local home
     home=$(new_home)
     expect "history.sh settings" \
-        '50000|100000|ignoreboth:erasedups|%F %T |on|existing;history -a|_omp_hook;other;history -a' \
+        '100000|200000|ignoreboth:erasedups|%F %T |on|existing;__dotfiles_history_save|_omp_hook;other;__dotfiles_history_save' \
         "$home" PROMPT_COMMAND=existing -- "$REPO/home/.bashrc.d/history.sh" <<'BASH'
 join() { local IFS=';'; printf '%s' "$*"; }
 for attempt in 1 2; do
@@ -1149,6 +1586,141 @@ for attempt in 1 2; do
 done
 printf '|%s' "$(join "${PROMPT_COMMAND[@]}")"
 BASH
+}
+
+# history.sh starts the archive from ~/.bash_history, readable only by you, only
+# in an interactive shell and only once; its save then appends each new command
+# with its time, once (a repeated save with no new command adds nothing), and
+# keeps $?. Its interactive-only test is replaced for the sandbox shell.
+check_history_archive() {
+    local home
+    home=$(new_home)
+    printf '%s\n' 'old untimed' '#1700000000' 'git status' >"$home/.bash_history"
+    expect "history.sh archive" 'none|seeded|private|1|echo one;echo two|2' "$home" PATH=/usr/bin:/bin -- \
+        "$REPO/home/.bashrc.d/history.sh" "$SED_BIN" <<'BASH'
+HISTFILE=$HOME/.bash_history
+archive=$HOME/.local/state/bash/history
+cp "$HISTFILE" "$HOME/original"
+source "$1"
+if [[ ! -e $archive ]]; then printf 'none|'; fi
+interactive() { source <("$2" 's/\[\[ \$- == \*i\* && /[[ /' "$1"); }
+interactive "$@"
+printf 'x\n' >>"$HISTFILE"
+interactive "$@"
+if cmp -s "$HOME/original" "$archive"; then printf 'seeded|'; fi
+if [[ $(ls -l "$archive") == '-rw-------'* ]]; then printf 'private|'; fi
+# The first save only notes the newest entry, here this very line, and keeps $?.
+set -o history
+history -r
+false; __dotfiles_history_save; printf '%s|' "$?"
+history -s 'echo one'; __dotfiles_history_save; __dotfiles_history_save
+history -s 'echo two'; __dotfiles_history_save
+tail -n +4 "$archive" >"$HOME/added"
+commands=() stamps=0
+while IFS= read -r line; do
+    if [[ $line =~ ^#[0-9]+$ ]]; then stamps=$((stamps + 1)); else commands+=("$line"); fi
+done <"$HOME/added"
+(IFS=';'; printf '%s|%s' "${commands[*]}" "$stamps")
+BASH
+}
+
+# hgrep searches the history archive, ignoring case, and prints each match with
+# its time, blank for a command saved without one: with awk's strftime, and with
+# the shell loop when awk lacks it (a stub here). A timestamp line that matches
+# is not a command. Without an archive it searches the live history.
+check_hgrep() {
+    local home expected mode
+    home=$(new_home)
+    mkdir -p "$home/noawk"
+    printf '#!/bin/sh\nexit 2\n' >"$home/noawk/awk"
+    chmod +x "$home/noawk/awk"
+    printf '%s\n' 'old untimed git log' '#1700000000' 'git status' '#1700000100' 'echo 1700000100' \
+        '#1700000200' 'GIT push' 'git second line' >"$home/archive"
+    expected="                     old untimed git log
+2023-11-14 22:13:20  git status
+2023-11-14 22:16:40  GIT push
+                     git second line
+|2023-11-14 22:15:00  echo 1700000100"
+    for mode in awk loop; do
+        expect "hgrep, archive ($mode)" "$expected" "$home" TZ=UTC HISTARCHIVE="$home/archive" \
+            PATH="$([[ $mode == loop ]] && printf '%s:' "$home/noawk")/usr/bin:/bin" -- \
+            "$REPO/home/.bashrc.d/functions.sh" "$SED_BIN" <<'BASH'
+source <("$2" '/^\[\[ \$- == \*i\* \]\] || return 0$/d' "$1")
+hgrep git
+printf '|'
+hgrep 17000
+BASH
+    done
+    # The live history holds the hgrep command too, which matches as well.
+    expect "hgrep, live history" "    1  git from memory
+    2  hgrep 'from memory'" "$home" PATH=/usr/bin:/bin -- \
+        "$REPO/home/.bashrc.d/functions.sh" "$SED_BIN" <<'BASH'
+source <("$2" '/^\[\[ \$- == \*i\* \]\] || return 0$/d' "$1")
+set -o history
+history -s 'git from memory'
+hgrep 'from memory'
+BASH
+}
+
+# code_settings_apply adds only the missing settings after the opening brace,
+# keeping a value you set and your comments, backs the file up once per change,
+# and changes nothing when all are there. An empty object takes no trailing
+# comma. It refuses a missing file and one whose first line is not {, and extra
+# arguments are a usage error.
+check_code_settings() {
+    local home expected
+    home=$(new_home)
+    mkdir -p "$home/.config/Code/User"
+    printf '%s\n' '{' '    // mine' '    "editor.fontSize": 14,' '    "extensions.ignoreRecommendations": false' '}' \
+        >"$home/.config/Code/User/settings.json"
+    expected='0|{
+    "telemetry.telemetryLevel": "off",
+    "extensions.showRecommendationsOnlyOnDemand": true,
+    // mine
+    "editor.fontSize": 14,
+    "extensions.ignoreRecommendations": false
+}
+|1|0|1|{
+    "telemetry.telemetryLevel": "off",
+    "extensions.ignoreRecommendations": true,
+    "extensions.showRecommendationsOnlyOnDemand": true
+}
+|1|1|{ "a": 1 }
+|2'
+    expect "code_settings_apply" "$expected" "$home" PATH=/usr/bin:/bin -- "$REPO/home/.bashrc.d/vscode.sh" <<'BASH'
+source "$1"
+shopt -s nullglob
+settings=$HOME/.config/Code/User/settings.json
+code_settings_apply >/dev/null
+printf '%s|' "$?"
+cat "$settings"
+backups=("$settings".bak.*)
+printf '|%s|' "${#backups[@]}"
+code_settings_apply >/dev/null
+printf '%s|' "$?"
+backups=("$settings".bak.*)
+printf '%s|' "${#backups[@]}"
+printf '{\n}\n' >"$HOME/empty.json"
+code_settings_apply "$HOME/empty.json" >/dev/null
+cat "$HOME/empty.json"
+code_settings_apply "$HOME/missing.json" 2>/dev/null
+printf '|%s|' "$?"
+printf '{ "a": 1 }\n' >"$HOME/inline.json"
+code_settings_apply "$HOME/inline.json" 2>/dev/null
+printf '%s|' "$?"
+cat "$HOME/inline.json"
+code_settings_apply a b 2>/dev/null
+printf '|%s' "$?"
+BASH
+}
+
+# Every helper names its author on an Author line under what it does.
+check_helper_headers() {
+    local helper
+    for helper in "$REPO"/home/.local/share/helpers/sh/*.sh; do
+        grep -q '^# Author: ' "$helper" || fail "helper headers" "${helper##*/} has no Author line"
+    done
+    pass "every helper names its author"
 }
 
 # .bashrc appends the helpers directory once, after everything else on PATH, so
@@ -1282,6 +1854,10 @@ main() {
     check_aws_region
     check_telemetry_defaults
     check_history
+    check_history_archive
+    check_hgrep
+    check_helper_headers
+    check_code_settings
     check_helpers_path
     check_gcloud_path
     check_dotnet_path
@@ -1290,6 +1866,9 @@ main() {
     check_pre_commit_hook
     check_install_scripts
     check_init_gitconfig
+    check_init_local
+    check_vscode_installer
+    check_go_installer
     check_theme_selection
     check_editor_configs
     check_tmux_status
