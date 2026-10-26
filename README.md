@@ -18,8 +18,9 @@ manager's Go source, tests, and binaries live in the `homeskillet` repository.
 - **Terminal:** Ptyxis and GNOME Terminal set to the prompt's Nerd Font, with
   Ctrl+C and Ctrl+V for copy and paste.
 - **Tools:** Git defaults, tmux, vim, and curl settings, and `.hushlogin`.
-- **Helpers and setup steps:** a starter `~/.gitconfig` for your identity, and
-  reviewed installers for Oh My Posh, its font, and the .NET SDK.
+- **Helpers and setup steps:** a starter `~/.gitconfig` for your identity,
+  commit signing, and GitHub and GitLab credentials, and reviewed installers for
+  Oh My Posh, its font, and the .NET SDK.
 - **Safety:** a pre-commit hook, CI, and `.gitignore` rules that keep secrets
   and personal details out of this public repository, plus regression checks.
 
@@ -112,19 +113,29 @@ lists them without running anything.
 
 | Step | Runs | Done when |
 | --- | --- | --- |
-| `gitconfig` | [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh): a starter `~/.gitconfig` with commented examples and no settings | `~/.gitconfig` exists |
+| `gitconfig` | [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh): a starter `~/.gitconfig` with commented examples, plus commit signing and the `gh` and `glab` credential helpers when the machine is ready for them | `~/.gitconfig` exists |
 | `oh-my-posh` | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh): the official installer into `~/.local/bin`, then config auto-reload turned on once | `oh-my-posh` is on PATH or in `~/.local/bin` |
 | `meslo-nerd-font` | `oh-my-posh font install Meslo` | the font is in `~/.local/share/fonts` |
 | `dotnet-sdk` | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh): the latest LTS SDK into `~/.dotnet` | `~/.dotnet/dotnet` exists |
 
 The installers download from the internet, so read each step before approving
 it. The install helpers save the official installer to a file and stop if the
-download fails, instead of piping it into a shell. Once linked,
-`install-dotnet.sh` is also a command of its own that passes options through to
-Microsoft's `dotnet-install.sh`, for example `--channel 9.0`,
-`--install-dir DIR`, or `--dry-run`. Packages from your distribution, such as
-`sudo dnf install dotnet-sdk-8.0`, work as well; the snippets handle either kind
-of install.
+download fails, instead of piping it into a shell.
+
+Once linked, `install-dotnet.sh` is also a command of its own. Its optional
+first argument picks what to install: `LTS` or `STS`, a release such as `10.0`
+(or `10`), a feature band such as `10.0.1xx`, or an exact SDK version such as
+`10.0.100`. Other options pass through to Microsoft's `dotnet-install.sh`, for
+example `--install-dir DIR`, `--runtime aspnetcore`, or `--dry-run`:
+
+```sh
+install-dotnet.sh 9.0            # the latest .NET 9 SDK
+install-dotnet.sh 10.0.100       # exactly SDK 10.0.100
+install-dotnet.sh STS --dry-run  # what the latest STS release would download
+```
+
+Packages from your distribution, such as `sudo dnf install dotnet-sdk-8.0`,
+work as well; the snippets handle either kind of install.
 
 ## Helpers
 
@@ -136,8 +147,8 @@ repository; afterward they are ordinary commands:
 
 | Helper | Does |
 | --- | --- |
-| [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh) | Creates a starter `~/.gitconfig` unless one exists, even as a symlink; `--dry-run` only reports |
-| [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh) | Installs a .NET SDK with Microsoft's `dotnet-install.sh`, into `~/.dotnet` unless told otherwise |
+| [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh) | Creates a starter `~/.gitconfig` unless one exists, even as a symlink; `--force` renames an existing one to a timestamped backup and replaces it; `--dry-run` only reports |
+| [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh) | Installs a .NET SDK with Microsoft's `dotnet-install.sh`: the latest LTS, or the release or version you name, into `~/.dotnet` unless told otherwise |
 | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh) | Installs Oh My Posh into `~/.local/bin` and turns on config auto-reload |
 
 ## Layout
@@ -302,9 +313,11 @@ Completions come from:
   you add there yourself stay on that machine; files under
   `home/.local/share/bash-completion/completions/` in this repository are
   linked by homeskillet and shared. [homeskillet.bash](home/.local/share/bash-completion/completions/homeskillet.bash)
-  is one: it completes homeskillet's commands, `self` subcommands, installed
-  versions, options, and directories for `-repo`, `-home`, `-data-dir`, and
-  `-prefix`.
+  is one: it loads the completion homeskillet writes itself
+  (`homeskillet completion bash`), only when that command succeeds, so
+  commands, options, setup step names, and installed versions always match
+  the installed homeskillet. A homeskillet too old to have the command leaves
+  file name completion in place.
 - **The snippets**, which register their tools' completions (see the table
   above) when the tool is installed. A generated completion script runs only
   when the tool produced it successfully.
@@ -345,13 +358,22 @@ resolutions, and aliases such as `git ghist` and `git unstage`. It needs Git
 2.37 or later. Git reads it before `~/.gitconfig`, which wins, so keep your
 name, email, signing key, and credential helpers in `~/.gitconfig`.
 
-`~/.gitconfig` is never linked, because what it holds is personal and tools
-such as `gh auth setup-git` add to it. The `gitconfig` setup step creates a
-starter one instead, with commented examples for identity and SSH commit
-signing and no settings, and never touches an existing file. The file must
-exist: `git config --global` writes to `~/.gitconfig` only when it does, and
-otherwise to the linked `~/.config/git/config`, which puts the change in this
-repository. Set your identity after the step runs:
+`~/.gitconfig` is never linked, because what it holds is personal and tools such
+as `gh auth setup-git` add to it. The `gitconfig` setup step creates a starter
+one instead, with commented examples for identity and SSH commit signing, and
+turns on what the machine is ready for when it runs: GnuPG commit signing
+(`commit.gpgsign` and `gpg.program`) when `gpg` has a usable secret key, and
+HTTPS credentials from the GitHub CLI for github.com and gist.github.com, and
+from the GitLab CLI for gitlab.com, when `gh` or `glab` is installed. Those
+credential sections are what `gh auth setup-git` and
+`glab auth login --setup-git-credential-helper` write; anything not ready is a
+comment naming the command that turns it on. It never touches an existing file
+unless you run `init-gitconfig.sh --force`, which first renames it to
+`~/.gitconfig.bak.DATE-TIME`. Git reads `~/.config/git/config` as well, so the
+starter needs no include. The file must exist: `git config --global` writes to
+`~/.gitconfig` only when it does, and otherwise to the linked
+`~/.config/git/config`, which puts the change in this repository. Set your
+identity after the step runs:
 
 ```sh
 git config --global user.name 'Your Name'
@@ -431,7 +453,7 @@ homeskillet never manages:
 | To change | Where |
 | --- | --- |
 | Environment, aliases, functions for one machine | `~/.bashrc.d/local.sh`, created by you; it loads in alphabetical order with the snippets, so its assignments override defaults set before it, and `${VAR:-value}` defaults set after it yield to it |
-| Git name, email, signing key, credential helpers | `~/.gitconfig`, created by the `gitconfig` setup step and then yours: `git config --global` writes there |
+| Git name, email, signing key, credential helpers | `~/.gitconfig`, created by the `gitconfig` setup step and then yours: `git config --global` writes there; `init-gitconfig.sh --force` backs it up and writes a fresh starter |
 | Logout tasks for one machine | `~/.bash_logout.local`, created by you; `.bash_logout` runs it last |
 | Prompt theme | `OHMYPOSH_THEME` in `local.sh`, which loads before `oh-my-posh.sh`: a theme's name from `~/.config/oh-my-posh/themes`, such as `bubbles`, or a path to any theme file; every bundled theme except `jandedobbeleer` starts with the date and time at the left |
 | Tab completion for a command | a file named after it in `~/.local/share/bash-completion/completions` for one machine, or under `home/.local/share/bash-completion/completions/` to share it (see [Completion](#completion)) |
@@ -482,6 +504,11 @@ that links this clone, so commit them deliberately.
 - **An edit to a linked file disappears:** an editor that still has the old
   version open can save it over the change. Reload the file from disk before
   saving.
+- **Commits fail with `gpg failed to sign the data`:** the starter turned on
+  signing because `gpg` had a secret key, but Git signs with the key for
+  `user.email`. Point it at your key with
+  `git config --global user.signingkey KEYID`, or turn signing off with
+  `git config --global commit.gpgsign false`.
 - **`git config --global` changed this repository:** `~/.gitconfig` did not
   exist, so Git wrote to the linked `~/.config/git/config`. Run the `gitconfig`
   setup step (or `init-gitconfig.sh`), move the new lines into `~/.gitconfig`,
@@ -510,25 +537,28 @@ shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh
 `tests/check.sh` runs each startup file with Bash in an empty environment and a
 temporary home directory, so it never reads or changes your real home; its
 throwaway Git repositories ignore your global and system Git config, so commit
-signing or hooks set there never prompt. It needs neither Go nor homeskillet.
-It covers PATH handling, the AWS, Go, .NET, history, and telemetry defaults,
-the terminal font and copy and paste settings (including missing terminals and
+signing or hooks set there never prompt. It needs neither Go nor homeskillet. It
+covers PATH handling, the AWS, Go, .NET, history, and telemetry defaults, the
+terminal font and copy and paste settings (including missing terminals and
 logins that need no changes), when `.bash_logout` clears the screen, every
-completion file and the homeskillet completion's candidates, the helper
+completion file, that the homeskillet completion file loads homeskillet's own
+completion only when it is generated successfully, the helper
 functions, the secret scan (with throwaway repositories and fake secrets), the
 pre-commit hook, the install scripts (with a stub `curl`, so nothing is
-downloaded), that the starter `~/.gitconfig` sets nothing, receives
-`git config --global`, and never replaces a file, and that every snippet stays
-silent when its tool is missing. When bash-completion is installed, it also checks
-that `.bashrc` loads it and that it loads a completion from the user directory
-on first use. When vim and tmux are installed, it loads `.vimrc` and
-`tmux.conf`, fails on any error, and checks vim's ruler, tmux's terminal title,
-and the red tab of a window running `sudo` or `su` (stand-ins named after them,
-so nothing runs as root). When Oh My Posh is installed, it renders every theme
-except `jandedobbeleer` and requires the date and time at the start of its top
-line; otherwise those checks are reported as skipped. It stops at the
-first failure and exits 0 when every check passes, 1 when a check fails, and 2
-on a usage error.
+downloaded), that the starter `~/.gitconfig` turns on signing and the `gh` and
+`glab` credential helpers only when each is ready (with stub `gpg`, `gh`, and
+`glab`), receives `git config --global`, and replaces a file only with
+`--force`, after backing it up, and that every snippet stays silent when its
+tool is missing. When bash-completion is installed, it also checks that
+`.bashrc` loads it and that it loads a completion from the user directory on
+first use. When vim and tmux are installed, it loads `.vimrc` and `tmux.conf`,
+fails on any error, and checks vim's ruler, tmux's terminal title, and the red
+tab of a window running `sudo` or `su` (stand-ins named after them, so nothing
+runs as root). When Oh My Posh is installed, it renders every theme except
+`jandedobbeleer` and requires the date and time at the start of its top line;
+otherwise those checks are reported as skipped. It stops at the first failure
+and exits 0 when every check passes, 1 when a check fails, and 2 on a usage
+error.
 
 ShellCheck needs no options, so it also works on a single file and in editor
 integrations. Sourced files have no shebang, so each one starts with a
@@ -558,7 +588,8 @@ pre-commit autoupdate       # refresh the pinned hook versions
 ```
 
 To also link, check, and unlink every file under `home/` in a temporary home,
-and dry-run the setup steps, pass a built manager:
+dry-run the setup steps, and complete commands and setup step names through
+the completion file, pass a built manager:
 
 ```sh
 bash tests/check.sh /path/to/homeskillet

@@ -19,9 +19,10 @@ to change it without breaking its guarantees.
   .githooks`); it and CI enforce part of this rule.
 - Never put a file under `home/` that tools write personal settings into, such
   as `~/.gitconfig`: writes follow the link into this repository. Create such a
-  file once with a setup step and a helper that never replaces an existing file,
-  as `init-gitconfig.sh` does, and keep the shared settings in a linked file the
-  tool also reads (`~/.config/git/config`).
+  file once with a setup step and a helper that leaves an existing file alone
+  unless asked (`--force`), and then renames it to a backup first, as
+  `init-gitconfig.sh` does. Keep the shared settings in a linked file the tool
+  also reads (`~/.config/git/config`).
 
 ## Shell Snippets (`home/.bashrc.d/*.sh`)
 
@@ -47,8 +48,9 @@ to change it without breaking its guarantees.
   differ between versions. Silence `compopt`, which fails outside completion.
 - `compgen -W` expands its word list: give it fixed words, or command output
   filtered to plain values first.
-- A tool's own generated completion belongs in its snippet instead, following
-  the snippet rules above.
+- A tool's own generated completion belongs in its snippet, following the
+  snippet rules above, or, to load it only on first use, in a file here that
+  evaluates it only when the generator succeeds, as `homeskillet.bash` does.
 
 ## Functions, Helpers, and Scripts
 
