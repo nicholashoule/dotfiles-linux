@@ -40,17 +40,18 @@ to change it without breaking its guarantees.
 ## Completions (`home/.local/share/bash-completion/completions/`)
 
 - `.bashrc` loads bash-completion before the snippets; it lazy-loads a file from
-  this directory the first time its command is completed. Name each file after
-  its command (`name.bash`), start it with `# shellcheck shell=bash` and a
-  comment saying what it completes, and register only that command.
+  this directory the first time its command is completed. The directory exists
+  only once it holds a hand-written completion. Name each file after its command
+  (`name.bash`), start it with `# shellcheck shell=bash` and a comment saying
+  what it completes, and register only that command; the checks source each
+  file and run ShellCheck on it.
 - Write plain Bash (`COMP_WORDS`, `COMP_CWORD`, `compgen`, and
   `mapfile -t COMPREPLY`), not bash-completion's helper functions, whose names
   differ between versions. Silence `compopt`, which fails outside completion.
 - `compgen -W` expands its word list: give it fixed words, or command output
   filtered to plain values first.
-- A tool's own generated completion belongs in its snippet, following the
-  snippet rules above, or, to load it only on first use, in a file here that
-  evaluates it only when the generator succeeds, as `homeskillet.bash` does.
+- A tool's own generated completion belongs in its snippet instead, following
+  the snippet rules above, as `homeskillet.sh` does.
 
 ## Functions, Helpers, and Scripts
 
@@ -99,6 +100,6 @@ to change it without breaking its guarantees.
 
 ```sh
 bash tests/check.sh /path/to/homeskillet
-shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh home/.local/share/helpers/sh/*.sh home/.local/share/bash-completion/completions/* scripts/*.sh tests/check.sh .githooks/pre-commit
+shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh home/.local/share/helpers/sh/*.sh scripts/*.sh tests/check.sh .githooks/pre-commit
 bash scripts/check-secrets.sh --all
 ```

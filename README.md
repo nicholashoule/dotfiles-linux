@@ -160,8 +160,6 @@ home/                        linked into your home directory, file by file
   .bashrc.d/                 one snippet per tool, plus aliases and functions
   .config/git/  .config/tmux/  .config/oh-my-posh/themes/
   .local/share/helpers/sh/   helper commands
-  .local/share/bash-completion/completions/
-                             command completions, loaded on first use
   .curlrc  .hushlogin  .vimrc
 dotfiles.json                setup steps for homeskillet
 scripts/check-secrets.sh     secret scan, run by the hook and CI
@@ -260,6 +258,7 @@ aliases, functions, completions, and the prompt load only in interactive shells.
 | [gcp.sh](home/.bashrc.d/gcp.sh) | gcloud surveys and usage reporting off; `~/google-cloud-sdk/bin` added to PATH when present | `gcloud` completion for that install |
 | [golang.sh](home/.bashrc.d/golang.sh) | `GOBIN`, or the first `GOPATH` entry's `bin`, added to PATH; Go telemetry off | — |
 | [history.sh](home/.bashrc.d/history.sh) | 50,000 commands with timestamps, no duplicates, appended to `~/.bash_history` as each command runs | — |
+| [homeskillet.sh](home/.bashrc.d/homeskillet.sh) | — | `homeskillet` completion, written by homeskillet itself (`homeskillet completion bash`), so it always matches the installed version |
 | [kubectl.sh](home/.bashrc.d/kubectl.sh) | — | `kubectl` completion |
 | [oh-my-posh.sh](home/.bashrc.d/oh-my-posh.sh) | — | prompt with the theme named by `OHMYPOSH_THEME` (`bubblesextra` by default): the date and time on the left with a 12-hour clock (`Sun Oct 25 03:51:28 AM PDT 2026`), and the path, Git, language versions, and battery on the right, on a line of their own when the terminal is too narrow for both |
 | [opentofu.sh](home/.bashrc.d/opentofu.sh) | — | `tofu` completion |
@@ -310,17 +309,14 @@ Completions come from:
 
 - **Files named after a command** in `~/.local/share/bash-completion/completions`
   (`mytool` or `mytool.bash`), which take precedence over the system's. Files
-  you add there yourself stay on that machine; files under
+  you add there yourself stay on that machine; files you add under
   `home/.local/share/bash-completion/completions/` in this repository are
-  linked by homeskillet and shared. [homeskillet.bash](home/.local/share/bash-completion/completions/homeskillet.bash)
-  is one: it loads the completion homeskillet writes itself
-  (`homeskillet completion bash`), only when that command succeeds, so
-  commands, options, setup step names, and installed versions always match
-  the installed homeskillet. A homeskillet too old to have the command leaves
-  file name completion in place.
+  linked by homeskillet and shared.
 - **The snippets**, which register their tools' completions (see the table
-  above) when the tool is installed. A generated completion script runs only
-  when the tool produced it successfully.
+  above) when the tool is installed, homeskillet's included. A generated
+  completion script runs only when the tool produced it successfully, so a
+  homeskillet too old to have its `completion` command leaves file name
+  completion in place.
 - **A `complete` line** next to a function or alias you define in a snippet or
   `local.sh`, such as `complete -A hostname sshfingerprint`.
 
@@ -531,7 +527,7 @@ is skipped.
 
 ```sh
 bash tests/check.sh
-shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh home/.local/share/helpers/sh/*.sh home/.local/share/bash-completion/completions/* scripts/*.sh tests/check.sh .githooks/pre-commit
+shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh home/.local/share/helpers/sh/*.sh scripts/*.sh tests/check.sh .githooks/pre-commit
 ```
 
 `tests/check.sh` runs each startup file with Bash in an empty environment and a
@@ -541,24 +537,23 @@ signing or hooks set there never prompt. It needs neither Go nor homeskillet. It
 covers PATH handling, the AWS, Go, .NET, history, and telemetry defaults, the
 terminal font and copy and paste settings (including missing terminals and
 logins that need no changes), when `.bash_logout` clears the screen, every
-completion file, that the homeskillet completion file loads homeskillet's own
-completion only when it is generated successfully, the helper
-functions, the secret scan (with throwaway repositories and fake secrets), the
-pre-commit hook, the install scripts (with a stub `curl`, so nothing is
-downloaded), that the starter `~/.gitconfig` turns on signing and the `gh` and
-`glab` credential helpers only when each is ready (with stub `gpg`, `gh`, and
-`glab`), receives `git config --global`, and replaces a file only with
-`--force`, after backing it up, and that every snippet stays silent when its
-tool is missing. When bash-completion is installed, it also checks that
-`.bashrc` loads it and that it loads a completion from the user directory on
-first use. When vim and tmux are installed, it loads `.vimrc` and `tmux.conf`,
-fails on any error, and checks vim's ruler, tmux's terminal title, and the red
-tab of a window running `sudo` or `su` (stand-ins named after them, so nothing
-runs as root). When Oh My Posh is installed, it renders every theme except
-`jandedobbeleer` and requires the date and time at the start of its top line;
-otherwise those checks are reported as skipped. It stops at the first failure
-and exits 0 when every check passes, 1 when a check fails, and 2 on a usage
-error.
+completion file, that `homeskillet.sh` loads homeskillet's own completion only
+when it is generated successfully, the helper functions, the secret scan (with
+throwaway repositories and fake secrets), the pre-commit hook, the install
+scripts (with a stub `curl`, so nothing is downloaded), that the starter
+`~/.gitconfig` turns on signing and the `gh` and `glab` credential helpers only
+when each is ready (with stub `gpg`, `gh`, and `glab`), receives
+`git config --global`, and replaces a file only with `--force`, after backing it
+up, and that every snippet stays silent when its tool is missing. When
+bash-completion is installed, it also checks that `.bashrc` loads it and that it
+loads a completion from the user directory on first use. When vim and tmux are
+installed, it loads `.vimrc` and `tmux.conf`, fails on any error, and checks
+vim's ruler, tmux's terminal title, and the red tab of a window running `sudo`
+or `su` (stand-ins named after them, so nothing runs as root). When Oh My Posh
+is installed, it renders every theme except `jandedobbeleer` and requires the
+date and time at the start of its top line; otherwise those checks are reported
+as skipped. It stops at the first failure and exits 0 when every check passes, 1
+when a check fails, and 2 on a usage error.
 
 ShellCheck needs no options, so it also works on a single file and in editor
 integrations. Sourced files have no shebang, so each one starts with a
@@ -589,7 +584,7 @@ pre-commit autoupdate       # refresh the pinned hook versions
 
 To also link, check, and unlink every file under `home/` in a temporary home,
 dry-run the setup steps, and complete commands and setup step names through
-the completion file, pass a built manager:
+`homeskillet.sh`, pass a built manager:
 
 ```sh
 bash tests/check.sh /path/to/homeskillet

@@ -227,7 +227,7 @@ source "$1"
 BASH
 }
 
-# stub_manager DIR MODE writes a stand-in homeskillet into DIR for the completion
+# stub_manager DIR MODE writes a stand-in homeskillet into DIR for the homeskillet.sh
 # checks. Its completion command succeeds with a script that registers a
 # completion (ok), or prints code that must never run and fails (fail), or is
 # missing with an error, as in a homeskillet too old to have it (old).
@@ -261,27 +261,35 @@ SH
 }
 
 # Every file in home/.local/share/bash-completion/completions, sourced alone, registers
-# a completion for the command it is named after (less .bash) and prints nothing. A
-# file that loads a tool's own generated completion finds a stand-in for that tool.
+# a completion for the command it is named after (less .bash) and prints nothing,
+# and passes ShellCheck when it is installed. The directory holds no files until a
+# shared completion is added, so the ShellCheck commands leave it to this check.
 check_completion_files() {
-    local home file name
+    local home file name output
     home=$(new_home)
-    stub_manager "$home/bin" ok
     for file in "$REPO"/home/.local/share/bash-completion/completions/*; do
         [[ -f $file ]] || continue
         name=${file##*/}
         name=${name%.bash}
-        expect "completion file for $name" registered "$home" PATH="$home/bin" -- "$file" "$name" <<'BASH'
+        expect "completion file for $name" registered "$home" -- "$file" "$name" <<'BASH'
 source "$1"
 complete -p -- "$2" >/dev/null && printf registered
 BASH
+        if ! command -v shellcheck >/dev/null; then
+            skip "completion file for $name, ShellCheck" "shellcheck is not installed"
+            continue
+        fi
+        output=$(shellcheck -- "$file" 2>&1) || fail "completion file for $name, ShellCheck" "$output"
+        pass "completion file for $name passes ShellCheck"
     done
 }
 
-# The homeskillet completion file loads the script homeskillet writes itself
-# (homeskillet completion bash) only when that command succeeds: a failing command's
-# output never runs, and a homeskillet too old to have the command, or none at all,
-# leaves nothing registered and prints nothing. Its helper variable is unset.
+# homeskillet.sh loads the script homeskillet writes itself (homeskillet completion
+# bash) only when that command succeeds: a failing command's output never runs, and
+# a homeskillet too old to have the command, or none at all, leaves nothing
+# registered and prints nothing. Its helper variable is unset. Its interactive-only
+# guard is removed, because the sandbox shell is not interactive; with the guard,
+# a non-interactive shell loads nothing.
 check_homeskillet_completion() {
     local home mode expected
     for mode in ok fail old none; do
@@ -293,20 +301,26 @@ check_homeskillet_completion() {
         if [[ $mode != none ]]; then
             stub_manager "$home/bin" "$mode"
         fi
-        expect "homeskillet completion file, generator $mode" "$expected" "$home" PATH="$home/bin" -- \
-            "$REPO/home/.local/share/bash-completion/completions/homeskillet.bash" <<'BASH'
-source "$1"
+        expect "homeskillet.sh completion, generator $mode" "$expected" "$home" PATH="$home/bin" -- \
+            "$REPO/home/.bashrc.d/homeskillet.sh" "$SED_BIN" <<'BASH'
+source <("$2" 's/\[\[ \$- == \*i\* \]\] && //' "$1")
 complete -p homeskillet 2>/dev/null
 if [[ -v homeskillet_completion ]]; then printf ' helper variable left set'; fi
 BASH
     done
+    home=$(new_home)
+    stub_manager "$home/bin" ok
+    expect "homeskillet.sh completion, non-interactive" '' "$home" PATH="$home/bin" -- \
+        "$REPO/home/.bashrc.d/homeskillet.sh" <<'BASH'
+source "$1"
+complete -p homeskillet 2>/dev/null || :
+BASH
 }
 
 # With bash-completion installed, an interactive .bashrc loads it, and it loads a
-# completion from the user directory on first use: here the homeskillet file, linked
-# as homeskillet links it, with a stand-in homeskillet. An empty compatibility
-# directory keeps out the system's extra completion files, so the default handler
-# is bash-completion's own.
+# completion from the user directory on first use: here a throwaway mytool.bash.
+# An empty compatibility directory keeps out the system's extra completion files,
+# so the default handler is bash-completion's own.
 check_completion_loading() {
     local home dir
     if [[ ! -r /usr/share/bash-completion/bash_completion && ! -r /etc/bash_completion ]]; then
@@ -316,19 +330,18 @@ check_completion_loading() {
     home=$(new_home)
     dir="$home/.local/share/bash-completion/completions"
     mkdir -p "$dir" "$home/compat"
-    stub_manager "$home/bin" ok
-    ln -s "$REPO/home/.local/share/bash-completion/completions/homeskillet.bash" "$dir/homeskillet.bash"
+    printf '%s\n' '_mytool() { :; }' 'complete -o filenames -F _mytool mytool' >"$dir/mytool.bash"
     expect "bash-completion loads a user completion on first use" \
-        'loaded|124|complete -o filenames -F _homeskillet homeskillet' "$home" \
-        PATH="$home/bin:/usr/bin:/bin" BASH_COMPLETION_COMPAT_DIR="$home/compat" -- "$REPO/home/.bashrc" "$SED_BIN" <<'BASH'
+        'loaded|124|complete -o filenames -F _mytool mytool' "$home" \
+        PATH="/usr/bin:/bin" BASH_COMPLETION_COMPAT_DIR="$home/compat" -- "$REPO/home/.bashrc" "$SED_BIN" <<'BASH'
 source <("$2" -n -e 's/\$- == \*i\* && //' -e '/^# User specific environment$/,$p' "$1")
 if [[ -n ${BASH_COMPLETION_VERSINFO-} ]]; then printf 'loaded|'; fi
-complete -p homeskillet 2>/dev/null
+complete -p mytool 2>/dev/null
 loader=$(complete -p -D)
 loader=${loader#*-F }
-"${loader%% *}" homeskillet '' homeskillet
+"${loader%% *}" mytool '' mytool
 printf '%s|' "$?"
-complete -p homeskillet
+complete -p mytool
 BASH
 }
 
@@ -1156,16 +1169,17 @@ check_manager_integration() {
     [[ -z $(ls -A "$setup_home") ]] || fail "setup --dry-run" "it changed the test home"
     pass "setup --dry-run succeeds and changes nothing"
 
-    # The completion file loads the manager's own completion, which completes its
-    # commands and this repository's setup step names; each name offered must be
-    # one dotfiles.json declares, so nothing here lists them.
+    # homeskillet.sh, its interactive-only guard removed, loads the manager's own
+    # completion, which completes its commands and this repository's setup step
+    # names; each name offered must be one dotfiles.json declares, so nothing here
+    # lists them.
     completion_home=$(new_home)
     mkdir -p "$completion_home/bin"
     ln -s "$MANAGER" "$completion_home/bin/homeskillet"
     expect "homeskillet completion through the manager" 'link|steps' "$completion_home" \
         PATH="$completion_home/bin:/usr/bin:/bin" -- \
-        "$REPO/home/.local/share/bash-completion/completions/homeskillet.bash" "$REPO" <<'BASH'
-source "$1"
+        "$REPO/home/.bashrc.d/homeskillet.sh" "$REPO" "$SED_BIN" <<'BASH'
+source <("$3" 's/\[\[ \$- == \*i\* \]\] && //' "$1")
 complete_words() {
     COMP_WORDS=("$@")
     COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
