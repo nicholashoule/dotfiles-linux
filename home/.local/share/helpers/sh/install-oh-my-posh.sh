@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Install Oh My Posh for the current user with its official installer.
+# Author: Nicholas Houle (https://github.com/nicholashoule)
 #
 # Usage: install-oh-my-posh.sh
 #

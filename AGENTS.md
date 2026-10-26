@@ -21,8 +21,8 @@ to change it without breaking its guarantees.
   as `~/.gitconfig`: writes follow the link into this repository. Create such a
   file once with a setup step and a helper that leaves an existing file alone
   unless asked (`--force`), and then renames it to a backup first, as
-  `init-gitconfig.sh` does. Keep the shared settings in a linked file the tool
-  also reads (`~/.config/git/config`).
+  `init-gitconfig.sh` and `init-local.sh` do. Keep the shared settings in a
+  linked file the tool also reads (`~/.config/git/config`).
 
 ## Shell Snippets (`home/.bashrc.d/*.sh`)
 
@@ -65,7 +65,8 @@ to change it without breaking its guarantees.
 - Helpers (`home/.local/share/helpers/sh/*.sh`, executable) and repository
   scripts (`scripts/`, `tests/`) start with `#!/usr/bin/env bash` and
   `set -euo pipefail`, declare global variables at the top, run from a `main`
-  function, and clean temporary directories with a trap.
+  function, and clean temporary directories with a trap. A helper names its
+  author on an `# Author:` line under the line saying what it does.
 - Downloads use `curl --disable --fail --proto '=https' --tlsv1.2` (`--disable`
   first, so the user's `~/.curlrc` cannot change them) and go to a file that is
   checked before it runs; never pipe a download into a shell. Installers are

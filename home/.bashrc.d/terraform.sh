@@ -7,7 +7,8 @@
 # that send the version, platform, and an anonymous ID).
 export CHECKPOINT_DISABLE=${CHECKPOINT_DISABLE:-1}
 
-# Uncomment defaults to use them; values already set take precedence.
+# Uncomment defaults to use them on every machine, or set them in
+# ~/.bashrc.d/local.sh for this one; values already set take precedence.
 # export TF_PLUGIN_CACHE_DIR=${TF_PLUGIN_CACHE_DIR:-$HOME/.terraform.d/plugin-cache}  # must already exist
 
 # complete -C runs its command as shell code, so the path is quoted for spaces.

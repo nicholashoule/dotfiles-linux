@@ -9,7 +9,8 @@
 export AWS_REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-us-west-2}}
 export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-$AWS_REGION}
 
-# Uncomment defaults to use them; values already set take precedence.
+# Uncomment defaults to use them on every machine, or set them in
+# ~/.bashrc.d/local.sh for this one; values already set take precedence.
 # export AWS_PROFILE=${AWS_PROFILE:-default}
 # export AWS_DEFAULT_OUTPUT=${AWS_DEFAULT_OUTPUT:-json}
 # export AWS_PAGER=${AWS_PAGER-}  # empty disables the CLI pager

@@ -15,8 +15,9 @@
 #                      every snippet can register its own
 #   4. ~/.bashrc.d/*   one file per tool, sourced in glob (alphabetical) order;
 #                      prefix a name with 00- or zz- to run it first or last.
-#                      Machine-specific settings go in an unmanaged
-#                      ~/.bashrc.d/local.sh, which loads with the others.
+#                      Machine-specific settings go in ~/.bashrc.d/local.sh,
+#                      which the local setup step creates with commented
+#                      examples and never links; it loads with the others.
 #
 # Startup cost: this runs for every new shell, so keep it fast.
 #   - PATH edits skip entries already present, so re-sourcing this file or

@@ -3,6 +3,9 @@
 # https://code.visualstudio.com/docs/setup/linux
 # Package installs put `code` on PATH. VS Code telemetry is a setting, not an
 # environment variable: set "telemetry.telemetryLevel": "off" in settings.json.
+# There, "extensions.showRecommendationsOnlyOnDemand": true hides the Extensions
+# view's Recommended section, and "extensions.ignoreRecommendations": true stops
+# recommendation pop-ups. VS Code writes settings.json, so it is never linked.
 
 # code_extensions_install installs the extensions listed below that are missing.
 # Edit the list to match yours; `code --list-extensions` prints what is installed.

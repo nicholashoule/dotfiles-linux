@@ -54,6 +54,12 @@
 .env
 .env.*
 
+# Machine-specific files belong only in the home directory: a copy under home/
+# would be linked to every machine and could be committed.
+home/.bashrc.d/local.sh
+home/.bash_logout.local
+home/.inputrc.local
+
 # Editors, operating systems, and agent local state
 /.vscode/
 /.idea/

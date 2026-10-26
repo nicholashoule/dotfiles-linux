@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Create a starter ~/.gitconfig for personal Git settings.
+# Author: Nicholas Houle (https://github.com/nicholashoule)
 #
 # Usage: init-gitconfig.sh [--dry-run] [--force]
 #

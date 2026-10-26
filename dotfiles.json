@@ -6,6 +6,11 @@
       "creates": ".gitconfig"
     },
     {
+      "name": "local",
+      "run": ["bash", "home/.local/share/helpers/sh/init-local.sh"],
+      "creates": ".bashrc.d/local.sh"
+    },
+    {
       "name": "oh-my-posh",
       "run": ["bash", "home/.local/share/helpers/sh/install-oh-my-posh.sh"],
       "provides": "oh-my-posh"

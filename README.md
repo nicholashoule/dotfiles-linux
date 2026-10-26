@@ -20,8 +20,9 @@ manager's Go source, tests, and binaries live in the `homeskillet` repository.
   Ctrl+C and Ctrl+V for copy and paste.
 - **Tools:** Git defaults, tmux, vim, and curl settings, and `.hushlogin`.
 - **Helpers and setup steps:** a starter `~/.gitconfig` for your identity,
-  commit signing, and GitHub and GitLab credentials, and reviewed installers for
-  Oh My Posh, its font, and the .NET SDK.
+  commit signing, and GitHub and GitLab credentials, a commented `local.sh` for
+  this machine's overrides, and reviewed installers for Oh My Posh, its font,
+  and the .NET SDK.
 - **Safety:** a pre-commit hook, CI, and `.gitignore` rules that keep secrets
   and personal details out of this public repository, plus regression checks.
 
@@ -115,6 +116,7 @@ lists them without running anything.
 | Step | Runs | Done when |
 | --- | --- | --- |
 | `gitconfig` | [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh): a starter `~/.gitconfig` with commented examples, plus commit signing and the `gh` and `glab` credential helpers when the machine is ready for them | `~/.gitconfig` exists |
+| `local` | [init-local.sh](home/.local/share/helpers/sh/init-local.sh): a starter `~/.bashrc.d/local.sh` for this machine's own settings, holding only commented examples | `~/.bashrc.d/local.sh` exists |
 | `oh-my-posh` | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh): the official installer into `~/.local/bin`, then config auto-reload turned on once | `oh-my-posh` is on PATH or in `~/.local/bin` |
 | `meslo-nerd-font` | `oh-my-posh font install Meslo` | the font is in `~/.local/share/fonts` |
 | `dotnet-sdk` | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh): the latest LTS SDK into `~/.dotnet` | `~/.dotnet/dotnet` exists |
@@ -149,6 +151,7 @@ repository; afterward they are ordinary commands:
 | Helper | Does |
 | --- | --- |
 | [init-gitconfig.sh](home/.local/share/helpers/sh/init-gitconfig.sh) | Creates a starter `~/.gitconfig` unless one exists, even as a symlink; `--force` renames an existing one to a timestamped backup and replaces it; `--dry-run` only reports |
+| [init-local.sh](home/.local/share/helpers/sh/init-local.sh) | Creates `~/.bashrc.d/local.sh`, readable only by you and holding only commented examples, unless one exists; `--force` renames an existing one to a timestamped backup and replaces it; `--dry-run` only reports |
 | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh) | Installs a .NET SDK with Microsoft's `dotnet-install.sh`: the latest LTS, or the release or version you name, into `~/.dotnet` unless told otherwise |
 | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh) | Installs Oh My Posh into `~/.local/bin` and turns on config auto-reload |
 
@@ -219,7 +222,9 @@ out of it:
    files anywhere in the repository, including under `home/`: files named
    `credentials` or `credentials.*`, keys and keystores, everything in `.ssh`
    except `config` and public keys, and tool files such as `.netrc`, `.npmrc`,
-   `.pgpass`, and kubeconfig.
+   `.pgpass`, and kubeconfig. It also ignores the machine-specific files under
+   `home/` (`local.sh`, `.inputrc.local`, `.bash_logout.local`), which belong
+   only in your home directory.
 2. The pre-commit hook, [.githooks/pre-commit](.githooks/pre-commit), runs
    [scripts/check-secrets.sh](scripts/check-secrets.sh) on what each commit
    would add. It blocks files that `.gitignore` ignores but were added with
@@ -258,7 +263,7 @@ aliases, functions, completions, and the prompt load only in interactive shells.
 | [functions.sh](home/.bashrc.d/functions.sh) | — | shell: `hgrep`, `paths`, `timer`; network: `allips`, `localip`, `publicip`, `sshfingerprint`; text: `urlencode`; terminal: `colors`, `truecolor` |
 | [gcp.sh](home/.bashrc.d/gcp.sh) | gcloud surveys and usage reporting off; `~/google-cloud-sdk/bin` added to PATH when present | `gcloud` completion for that install |
 | [golang.sh](home/.bashrc.d/golang.sh) | `GOBIN`, or the first `GOPATH` entry's `bin`, added to PATH; Go telemetry off | — |
-| [history.sh](home/.bashrc.d/history.sh) | 50,000 commands with timestamps, no duplicates, appended to `~/.bash_history` as each command runs | — |
+| [history.sh](home/.bashrc.d/history.sh) | 100,000 commands in memory and in `~/.bash_history` (200,000 lines, with their timestamps), no duplicates, saved as each command runs; every command also goes, with its time, to an archive that `hgrep` searches | — |
 | [homeskillet.sh](home/.bashrc.d/homeskillet.sh) | — | `homeskillet` completion, written by homeskillet itself (`homeskillet completion bash`), so it always matches the installed version |
 | [kubectl.sh](home/.bashrc.d/kubectl.sh) | — | `kubectl` completion |
 | [oh-my-posh.sh](home/.bashrc.d/oh-my-posh.sh) | — | prompt with the theme named by `OHMYPOSH_THEME` (`bubblesextra` by default): the date and time on the left with a 12-hour clock (`Sun Oct 25 03:51:28 AM PDT 2026`), and the path, Git, language versions, and battery on the right, on a line of their own when the terminal is too narrow for both |
@@ -270,11 +275,15 @@ aliases, functions, completions, and the prompt load only in interactive shells.
 `.bashrc` also sets `DO_NOT_TRACK=1`, a telemetry opt-out some tools honor. Go
 has no environment switch for telemetry, so `golang.sh` runs `go telemetry off`
 once and Go keeps that setting. VS Code's telemetry is a setting instead:
-`"telemetry.telemetryLevel": "off"` in its `settings.json`. OpenTofu also reads
-the `TF_*` variables set in `terraform.sh`.
+`"telemetry.telemetryLevel": "off"` in its `settings.json`, which VS Code writes
+itself and so is never linked.
+`"extensions.showRecommendationsOnlyOnDemand": true` hides the Extensions view's
+Recommended section, and `"extensions.ignoreRecommendations": true` stops
+recommendation pop-ups. OpenTofu also reads the `TF_*` variables set in
+`terraform.sh`.
 
 Most snippets also list optional defaults as commented exports. Uncomment one
-to use it:
+to use it on every machine, or set it in `~/.bashrc.d/local.sh` for this one:
 
 ```sh
 export CLOUDSDK_CORE_PROJECT=${CLOUDSDK_CORE_PROJECT:-example-project}
@@ -286,9 +295,21 @@ which reads `GOBIN` and `GOPATH` as it runs: set those in `golang.sh` or with
 `go env -w`, not in a file that sorts after it. Prefix a snippet's name with
 `00-` or `zz-` to run it first or last.
 
-History settings are assigned directly, because Bash and `/etc/profile` set
-them before any snippet runs. Start a command with a space to keep it out of
-history; override the sizes or filters in a later file such as `local.sh`.
+History has two layers, so no command is lost and no shell slows down. Bash
+reads the whole history file into every new shell and keeps the list in memory,
+so the live history, which up-arrow and Ctrl+R use, stays at 100,000 commands:
+measured here, a million would add about 0.3 s to each new shell and 140 MB to
+each open one, against 0.03 s and 17 MB. Every command also goes, with its time,
+to an archive that bash never loads, `~/.local/state/bash/history` (readable
+only by you), and `hgrep PATTERN` searches it, printing each match with when it
+ran. The first interactive shell to find no archive starts it from
+`~/.bash_history`, before the smaller size trims that file, so switching loses
+nothing. Commands that history skips, those typed with a leading space or listed
+in `HISTIGNORE`, are not archived either. History settings are assigned
+directly, because Bash and `/etc/profile` set them before any snippet runs;
+override the sizes or filters in a later file such as `local.sh`. To move the
+archive, set `HISTARCHIVE` in a file that sorts before `history.sh`, such as
+`00-local.sh`.
 
 Installers that offer to edit `.bashrc`, such as gcloud's `install.sh` and the
 uv installer, would write through the link into this repository. Decline, or set
@@ -473,11 +494,12 @@ homeskillet never manages:
 
 | To change | Where |
 | --- | --- |
-| Environment, aliases, functions for one machine | `~/.bashrc.d/local.sh`, created by you; it loads in alphabetical order with the snippets, so its assignments override defaults set before it, and `${VAR:-value}` defaults set after it yield to it |
+| Environment, aliases, functions for one machine | `~/.bashrc.d/local.sh`, created by the `local` setup step with commented examples of the supported overrides and then yours; it loads in alphabetical order with the snippets, so its assignments override defaults set before it, and `${VAR:-value}` defaults set after it yield to it |
 | Git name, email, signing key, credential helpers | `~/.gitconfig`, created by the `gitconfig` setup step and then yours: `git config --global` writes there; `init-gitconfig.sh --force` backs it up and writes a fresh starter |
 | Logout tasks for one machine | `~/.bash_logout.local`, created by you; `.bash_logout` runs it last |
 | Prompt theme | `OHMYPOSH_THEME` in `local.sh`, which loads before `oh-my-posh.sh`: a theme's name from `~/.config/oh-my-posh/themes`, such as `bubbles`, or a path to any theme file; every bundled theme except `jandedobbeleer` starts with the date and time at the left |
 | Completion list colors | `LS_COLORS` entries appended in `local.sh`, such as `LS_COLORS+=':mi=00;36'` (later entries win); readline settings, such as `set colored-stats off`, in `~/.inputrc.local` |
+| History sizes, archive location | `HISTSIZE` and `HISTFILESIZE` in `local.sh`; `HISTARCHIVE` in a `~/.bashrc.d` file that sorts before `history.sh`, such as `00-local.sh` |
 | Tab completion for a command | a file named after it in `~/.local/share/bash-completion/completions` for one machine, or under `home/.local/share/bash-completion/completions/` to share it (see [Completion](#completion)) |
 | Go's `GOBIN`, `GOPATH`, or other settings | `go env -w`, which Go saves outside this repository |
 
@@ -512,6 +534,9 @@ that links this clone, so commit them deliberately.
 - **Home, End, or Ctrl+arrow keys stopped working:** `~/.inputrc` replaces
   `/etc/inputrc`, which it includes to keep those bindings. Check that
   `/etc/inputrc` exists, and add missing bindings to `~/.inputrc.local`.
+- **An old command is missing from up-arrow or Ctrl+R:** the live history keeps
+  the newest 100,000 commands. `hgrep PATTERN` searches the archive, which keeps
+  every command since it started.
 - **A completion file does not load:** its name must match the command
   (`mytool` or `mytool.bash`), and it loads once per shell, so after editing it
   run `complete -r mytool` or open a new terminal. Check it with `bash -n` and
@@ -567,7 +592,8 @@ shellcheck home/.bashrc home/.bash_profile home/.bash_logout home/.bashrc.d/*.sh
 temporary home directory, so it never reads or changes your real home; its
 throwaway Git repositories ignore your global and system Git config, so commit
 signing or hooks set there never prompt. It needs neither Go nor homeskillet. It
-covers PATH handling, the AWS, Go, .NET, history, and telemetry defaults, the
+covers PATH handling, the AWS, Go, .NET, history (including the archive and
+`hgrep`, with and without awk's `strftime`), and telemetry defaults, the
 terminal font and copy and paste settings (including missing terminals and
 logins that need no changes), when `.bash_logout` clears the screen, every
 completion file, that `homeskillet.sh` loads homeskillet's own completion only
@@ -577,12 +603,13 @@ scripts (with a stub `curl`, so nothing is downloaded), that the starter
 `~/.gitconfig` turns on signing and the `gh` and `glab` credential helpers only
 when each is ready (with stub `gpg`, `gh`, and `glab`), receives
 `git config --global`, and replaces a file only with `--force`, after backing it
-up, and that every snippet stays silent when its tool is missing. When
-bash-completion is installed, it also checks that `.bashrc` loads it and that it
-loads a completion from the user directory on first use. It also checks that
-`.inputrc` loads without readline errors and turns on the completion list
-settings, that `~/.inputrc.local` loads last, and that `.bashrc` appends the
-completion colors to `LS_COLORS` once, keeping its export state, and only in
+up, that `init-local.sh` writes a comments-only `local.sh` whose examples run
+and pass ShellCheck, and that every snippet stays silent when its tool is
+missing. When bash-completion is installed, it also checks that `.bashrc` loads
+it and that it loads a completion from the user directory on first use. It also
+checks that `.inputrc` loads without readline errors and turns on the completion
+list settings, that `~/.inputrc.local` loads last, and that `.bashrc` appends
+the completion colors to `LS_COLORS` once, keeping its export state, and only in
 interactive shells. When vim and tmux are installed, it loads `.vimrc` and
 `tmux.conf`, fails on any error, and checks vim's ruler, tmux's terminal title,
 and the red tab of a window running `sudo` or `su` (stand-ins named after them,
@@ -653,6 +680,7 @@ the MIT License. Every theme except `jandedobbeleer` starts its top line with
 the date and time on a 12-hour clock (`Sun Oct 25 03:51:28 AM PDT 2026`):
 `bubbles` and `bubblesextra` add it at the left and move the right side of that
 line to a line of its own when both do not fit (`"overflow": "break"`), and
-`emodipt` shows the full date in its bracketed clock instead of only the time.
+`emodipt` shows the full date in its bracketed clock instead of only the time,
+and the full path (`~/projects/sys`) instead of `..` for each parent folder.
 `jandedobbeleer`, which keeps its clock on the right, is the upstream file
 unchanged.

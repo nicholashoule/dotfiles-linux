@@ -767,6 +767,88 @@ STUB
     pass "install-dotnet.sh rejects an unknown release, or one with --channel or --version, before downloading"
 }
 
+# run_init_local HOME [ARG...] prints the output of init-local.sh run with HOME in
+# an empty environment holding only the core utilities, and returns its status.
+run_init_local() {
+    local home=$1
+    shift
+    env -i HOME="$home" PATH=/usr/bin:/bin "$BASH" "$REPO/home/.local/share/helpers/sh/init-local.sh" "$@" 2>&1
+}
+
+# init-local.sh creates ~/.bashrc.d/local.sh, readable only by you and holding
+# only comments, so it changes nothing until a line is uncommented. Each example,
+# uncommented, runs silently, adds its PATH entry once however often the file
+# runs, and passes ShellCheck. An existing file is left alone unless --force
+# moves it to a backup first; a symlinked ~/.bashrc.d is never written through;
+# --dry-run creates nothing, and an unknown argument is a usage error.
+check_init_local() {
+    local home other file output status examples
+    local -a backups
+    home=$(new_home)
+    file="$home/.bashrc.d/local.sh"
+    status=0
+    output=$(run_init_local "$home" --dry-run) || status=$?
+    [[ $status -eq 0 && $output == "Would create $file." && ! -e $home/.bashrc.d ]] ||
+        fail "init-local.sh --dry-run" "exit status $status: $output"
+    status=0
+    output=$(run_init_local "$home" --bogus) || status=$?
+    [[ $status -eq 2 && ! -e $file ]] || fail "init-local.sh, usage" "exit status $status: $output"
+    pass "init-local.sh --dry-run creates nothing, and a bad argument is a usage error"
+
+    status=0
+    output=$(run_init_local "$home") || status=$?
+    [[ $status -eq 0 && -f $file && $(ls -l "$file") == '-rw-------'* ]] ||
+        fail "init-local.sh, create" "exit status $status: $output; $(ls -l "$file" 2>&1)"
+    if grep -q -v -E '^(#|$)' "$file"; then
+        fail "init-local.sh, create" "the starter sets something: $(grep -v -E '^(#|$)' "$file")"
+    fi
+    pass "init-local.sh creates ~/.bashrc.d/local.sh with only comments, readable only by you"
+
+    examples="$home/examples.sh"
+    "$SED_BIN" -E 's/^# ((export |alias |case |[A-Z_]+\+?=).*)$/\1/' "$file" >"$examples"
+    grep -q -v -E '^(#|$)' "$examples" || fail "init-local.sh, examples" "nothing to uncomment"
+    expect "init-local.sh examples run silently and add PATH once" 1 "$home" -- "$examples" <<'BASH'
+source "$1"
+source "$1"
+count=0
+IFS=: read -ra parts <<<"$PATH"
+for part in "${parts[@]}"; do
+    if [[ $part == "$HOME/opt/tool/bin" ]]; then count=$((count + 1)); fi
+done
+printf '%s' "$count"
+BASH
+    if command -v shellcheck >/dev/null; then
+        output=$(shellcheck -- "$file" 2>&1) || fail "init-local.sh, ShellCheck" "$output"
+        # oh-my-posh.sh reads OHMYPOSH_THEME, so it looks unused on its own here.
+        output=$(shellcheck -s bash -e SC2034 -- "$examples" 2>&1) || fail "init-local.sh, ShellCheck" "$output"
+        pass "init-local.sh starter and its uncommented examples pass ShellCheck"
+    else
+        skip "init-local.sh, ShellCheck" "shellcheck is not installed"
+    fi
+
+    cp "$file" "$home/starter"
+    printf 'OHMYPOSH_THEME=emodipt\n' >"$file"
+    status=0
+    output=$(run_init_local "$home") || status=$?
+    [[ $status -eq 0 && $output == *'exists; leaving it unchanged'* && $(<"$file") == 'OHMYPOSH_THEME=emodipt' ]] ||
+        fail "init-local.sh, existing file" "exit status $status: $output"
+    status=0
+    output=$(run_init_local "$home" --force) || status=$?
+    backups=("$file".bak.*)
+    if [[ $status -ne 0 || ${#backups[@]} -ne 1 || ! -f ${backups[0]} ]] ||
+        [[ $(<"${backups[0]}") != 'OHMYPOSH_THEME=emodipt' ]] || ! cmp -s "$home/starter" "$file"; then
+        fail "init-local.sh --force" "exit status $status: $output"
+    fi
+    other=$(new_home)
+    mkdir "$other/target"
+    ln -s "$other/target" "$other/.bashrc.d"
+    status=0
+    output=$(run_init_local "$other") || status=$?
+    [[ $status -eq 1 && $output == *'is a symlink'* && -z $(ls -A "$other/target") ]] ||
+        fail "init-local.sh, symlinked directory" "exit status $status: $output"
+    pass "init-local.sh keeps an existing file unless --force backs it up, and never writes through a symlink"
+}
+
 # run_init_gitconfig HOME TOOLS [ARG...] prints the output of init-gitconfig.sh run
 # with HOME in an empty environment whose PATH holds only the stub directories
 # TOOLS and the core utilities it needs, so the gpg, gh, and glab installed here
@@ -1126,14 +1208,14 @@ check_tmux_status() {
     pass "tmux turns a window's tab red while a pane runs sudo or su"
 }
 
-# history.sh sets the history options and adds `history -a` to PROMPT_COMMAND as
-# an entry of its own, once, even when sourced twice: after a plain string and
-# after an array such as oh-my-posh's, whose entries must stay untouched.
+# history.sh sets the history options and adds its save to PROMPT_COMMAND as an
+# entry of its own, once, even when sourced twice: after a plain string and after
+# an array such as oh-my-posh's, whose entries must stay untouched.
 check_history() {
     local home
     home=$(new_home)
     expect "history.sh settings" \
-        '50000|100000|ignoreboth:erasedups|%F %T |on|existing;history -a|_omp_hook;other;history -a' \
+        '100000|200000|ignoreboth:erasedups|%F %T |on|existing;__dotfiles_history_save|_omp_hook;other;__dotfiles_history_save' \
         "$home" PROMPT_COMMAND=existing -- "$REPO/home/.bashrc.d/history.sh" <<'BASH'
 join() { local IFS=';'; printf '%s' "$*"; }
 for attempt in 1 2; do
@@ -1149,6 +1231,89 @@ for attempt in 1 2; do
 done
 printf '|%s' "$(join "${PROMPT_COMMAND[@]}")"
 BASH
+}
+
+# history.sh starts the archive from ~/.bash_history, readable only by you, only
+# in an interactive shell and only once; its save then appends each new command
+# with its time, once (a repeated save with no new command adds nothing), and
+# keeps $?. Its interactive-only test is replaced for the sandbox shell.
+check_history_archive() {
+    local home
+    home=$(new_home)
+    printf '%s\n' 'old untimed' '#1700000000' 'git status' >"$home/.bash_history"
+    expect "history.sh archive" 'none|seeded|private|1|echo one;echo two|2' "$home" PATH=/usr/bin:/bin -- \
+        "$REPO/home/.bashrc.d/history.sh" "$SED_BIN" <<'BASH'
+HISTFILE=$HOME/.bash_history
+archive=$HOME/.local/state/bash/history
+cp "$HISTFILE" "$HOME/original"
+source "$1"
+if [[ ! -e $archive ]]; then printf 'none|'; fi
+interactive() { source <("$2" 's/\[\[ \$- == \*i\* && /[[ /' "$1"); }
+interactive "$@"
+printf 'x\n' >>"$HISTFILE"
+interactive "$@"
+if cmp -s "$HOME/original" "$archive"; then printf 'seeded|'; fi
+if [[ $(ls -l "$archive") == '-rw-------'* ]]; then printf 'private|'; fi
+# The first save only notes the newest entry, here this very line, and keeps $?.
+set -o history
+history -r
+false; __dotfiles_history_save; printf '%s|' "$?"
+history -s 'echo one'; __dotfiles_history_save; __dotfiles_history_save
+history -s 'echo two'; __dotfiles_history_save
+tail -n +4 "$archive" >"$HOME/added"
+commands=() stamps=0
+while IFS= read -r line; do
+    if [[ $line =~ ^#[0-9]+$ ]]; then stamps=$((stamps + 1)); else commands+=("$line"); fi
+done <"$HOME/added"
+(IFS=';'; printf '%s|%s' "${commands[*]}" "$stamps")
+BASH
+}
+
+# hgrep searches the history archive, ignoring case, and prints each match with
+# its time, blank for a command saved without one: with awk's strftime, and with
+# the shell loop when awk lacks it (a stub here). A timestamp line that matches
+# is not a command. Without an archive it searches the live history.
+check_hgrep() {
+    local home expected mode
+    home=$(new_home)
+    mkdir -p "$home/noawk"
+    printf '#!/bin/sh\nexit 2\n' >"$home/noawk/awk"
+    chmod +x "$home/noawk/awk"
+    printf '%s\n' 'old untimed git log' '#1700000000' 'git status' '#1700000100' 'echo 1700000100' \
+        '#1700000200' 'GIT push' 'git second line' >"$home/archive"
+    expected="                     old untimed git log
+2023-11-14 22:13:20  git status
+2023-11-14 22:16:40  GIT push
+                     git second line
+|2023-11-14 22:15:00  echo 1700000100"
+    for mode in awk loop; do
+        expect "hgrep, archive ($mode)" "$expected" "$home" TZ=UTC HISTARCHIVE="$home/archive" \
+            PATH="$([[ $mode == loop ]] && printf '%s:' "$home/noawk")/usr/bin:/bin" -- \
+            "$REPO/home/.bashrc.d/functions.sh" "$SED_BIN" <<'BASH'
+source <("$2" '/^\[\[ \$- == \*i\* \]\] || return 0$/d' "$1")
+hgrep git
+printf '|'
+hgrep 17000
+BASH
+    done
+    # The live history holds the hgrep command too, which matches as well.
+    expect "hgrep, live history" "    1  git from memory
+    2  hgrep 'from memory'" "$home" PATH=/usr/bin:/bin -- \
+        "$REPO/home/.bashrc.d/functions.sh" "$SED_BIN" <<'BASH'
+source <("$2" '/^\[\[ \$- == \*i\* \]\] || return 0$/d' "$1")
+set -o history
+history -s 'git from memory'
+hgrep 'from memory'
+BASH
+}
+
+# Every helper names its author on an Author line under what it does.
+check_helper_headers() {
+    local helper
+    for helper in "$REPO"/home/.local/share/helpers/sh/*.sh; do
+        grep -q '^# Author: ' "$helper" || fail "helper headers" "${helper##*/} has no Author line"
+    done
+    pass "every helper names its author"
 }
 
 # .bashrc appends the helpers directory once, after everything else on PATH, so
@@ -1282,6 +1447,9 @@ main() {
     check_aws_region
     check_telemetry_defaults
     check_history
+    check_history_archive
+    check_hgrep
+    check_helper_headers
     check_helpers_path
     check_gcloud_path
     check_dotnet_path
@@ -1290,6 +1458,7 @@ main() {
     check_pre_commit_hook
     check_install_scripts
     check_init_gitconfig
+    check_init_local
     check_theme_selection
     check_editor_configs
     check_tmux_status
