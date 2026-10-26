@@ -22,7 +22,7 @@ manager's Go source, tests, and binaries live in the `homeskillet` repository.
 - **Helpers and setup steps:** a starter `~/.gitconfig` for your identity,
   commit signing, and GitHub and GitLab credentials, a commented `local.sh` for
   this machine's overrides, and reviewed installers for Oh My Posh, its font,
-  the .NET SDK, and VS Code.
+  the .NET SDK, VS Code, and Go.
 - **Safety:** a pre-commit hook, CI, and `.gitignore` rules that keep secrets
   and personal details out of this public repository, plus regression checks.
 
@@ -121,6 +121,7 @@ lists them without running anything.
 | `meslo-nerd-font` | `oh-my-posh font install Meslo` | the font is in `~/.local/share/fonts` |
 | `dotnet-sdk` | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh): the latest LTS SDK into `~/.dotnet` | `~/.dotnet/dotnet` exists |
 | `vscode` | [install-vscode.sh](home/.local/share/helpers/sh/install-vscode.sh): VS Code and its `code` command from Microsoft's signed package repository with dnf or apt (needs sudo) | `code` is on PATH |
+| `go` | [install-go.sh](home/.local/share/helpers/sh/install-go.sh): the newest patch of the Go release one behind the latest into `~/.local/share/go`, checked against go.dev's SHA-256, with `go` and `gofmt` linked into `~/.local/bin` | `go` is on PATH |
 
 The installers download from the internet, so read each step before approving
 it. Nothing downloaded is piped into a shell: `install-dotnet.sh` saves
@@ -160,6 +161,7 @@ repository; afterward they are ordinary commands:
 | [init-local.sh](home/.local/share/helpers/sh/init-local.sh) | Creates `~/.bashrc.d/local.sh`, readable only by you and holding only commented examples, unless one exists; `--force` renames an existing one to a timestamped backup and replaces it; `--dry-run` only reports |
 | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh) | Installs a .NET SDK with Microsoft's `dotnet-install.sh`: the latest LTS, or the release or version you name, into `~/.dotnet` unless told otherwise |
 | [install-vscode.sh](home/.local/share/helpers/sh/install-vscode.sh) | Installs VS Code and its `code` command from Microsoft's signed package repository with dnf or apt (needs sudo), unless `code` is already there; succeeds only when `code --version` runs |
+| [install-go.sh](home/.local/share/helpers/sh/install-go.sh) | Installs Go from go.dev into `~/.local/share/go` (or `GO_INSTALL_DIR`): the newest patch of the release one behind the latest, the latest with `--latest`, or a version (`install-go.sh 1.26.10`), after checking the archive's SHA-256; links `go` and `gofmt` into `~/.local/bin`, which leads PATH; rerun it to move to a newer patch |
 | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh) | Installs Oh My Posh from its GitHub release into `~/.local/bin`, the latest or the version given (`install-oh-my-posh.sh 31.9.1`), after checking the binary's SHA-256; leaves a matching binary alone; turns on config auto-reload |
 
 ## Layout

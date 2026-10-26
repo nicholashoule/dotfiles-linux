@@ -966,6 +966,162 @@ Signed-By: /usr/share/keyrings/microsoft-vscode.asc' ]]; then
     pass "install-vscode.sh stops on a bad or missing key, no package manager, no code afterward, or extra arguments"
 }
 
+# run_go_installer HOME [VAR=value...] [-- ARG...] prints the output of
+# install-go.sh run with HOME, the stub curl and uname, and the core tools it
+# needs on PATH, and returns its status.
+run_go_installer() {
+    local home=$1 stubs="$TEST_ROOT/go"
+    local -a vars=()
+    shift
+    while [[ $# -gt 0 && $1 != -- ]]; do
+        vars+=("$1")
+        shift
+    done
+    [[ ${1-} != -- ]] || shift
+    env -i HOME="$home" PATH="$stubs/bin:$stubs/core" CURL_LIST="$stubs/releases.json" CURL_FILES="$stubs" \
+        ${vars[@]+"${vars[@]}"} "$BASH" "$REPO/home/.local/share/helpers/sh/install-go.sh" "$@" 2>&1
+}
+
+# go_archive DIR VERSION writes DIR/VERSION.linux-amd64.tar.gz, a fake toolchain
+# whose go prints VERSION for `go env GOVERSION`, and prints its SHA-256.
+go_archive() {
+    local dir=$1 version=$2 sum
+    rm -rf "$dir/tree"
+    mkdir -p "$dir/tree/go/bin"
+    printf '%s\ntime 2026-01-01T00:00:00Z\n' "$version" >"$dir/tree/go/VERSION"
+    printf '#!/usr/bin/env bash\nif [[ $* == "env GOVERSION" ]]; then echo %s; fi\n' "$version" >"$dir/tree/go/bin/go"
+    printf '#!/usr/bin/env bash\n' >"$dir/tree/go/bin/gofmt"
+    chmod +x "$dir/tree/go/bin/go" "$dir/tree/go/bin/gofmt"
+    tar -czf "$dir/$version.linux-amd64.tar.gz" -C "$dir/tree" go
+    sum=$(sha256sum <"$dir/$version.linux-amd64.tar.gz")
+    printf '%s\n' "${sum%% *}"
+}
+
+# go_release VERSION SUM prints a release entry for go.dev's JSON list, with a
+# source file and a linux-amd64 archive, formatted as go.dev formats it.
+go_release() {
+    printf ' {\n  "version": "%s",\n  "stable": true,\n  "files": [\n' "$1"
+    printf '   {\n    "filename": "%s.src.tar.gz",\n    "version": "%s",\n    "sha256": "%064d",\n    "kind": "source"\n   },\n' "$1" "$1" 0
+    printf '   {\n    "filename": "%s.linux-amd64.tar.gz",\n    "os": "linux",\n    "arch": "amd64",\n    "version": "%s",\n    "sha256": "%s",\n    "kind": "archive"\n   }\n  ]\n }' "$1" "$1" "$2"
+}
+
+# install-go.sh installs the newest patch of the release one behind the latest,
+# the latest with --latest, or the version given (found in the full list), only
+# when its SHA-256 matches go.dev's list, swaps it in beside the old one, links
+# go and gofmt into ~/.local/bin, and leaves a toolchain at that version alone.
+# It refuses a wrong checksum, a version the list lacks, an install directory
+# that is not a Go toolchain, a bad argument, an unknown CPU, or a missing tool,
+# changing nothing, and leaves a go in ~/.local/bin that is not its link alone.
+# A stub curl serves the list and the archives and logs each URL.
+check_go_installer() {
+    local stubs="$TEST_ROOT/go" home status output tool latest previous patched older pair
+    mkdir -p "$stubs/bin" "$stubs/core"
+    for tool in awk bash cp dirname grep gzip head ln mkdir mktemp mv readlink rm sha256sum tar uniq; do
+        ln -s "$(command -v "$tool")" "$stubs/core/$tool"
+    done
+    cat >"$stubs/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+if [[ ${1-} != --disable ]]; then echo 'curl: called without --disable first' >&2; exit 2; fi
+out='' url=''
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --output) out=$2; shift ;;
+        https://*) url=$1 ;;
+    esac
+    shift
+done
+printf '%s\n' "$url" >>"$HOME/curl.log"
+case $url in
+    *'?mode=json'*) cp "$CURL_LIST" "$out" ;;
+    *) cp "$CURL_FILES/${url##*/}" "$out" 2>/dev/null || { echo 'curl: (22) 404' >&2; exit 22; } ;;
+esac
+STUB
+    cat >"$stubs/bin/uname" <<'STUB'
+#!/bin/sh
+case $1 in -m) echo "${UNAME_M:-x86_64}" ;; *) echo Linux ;; esac
+STUB
+    chmod +x "$stubs/bin/curl" "$stubs/bin/uname"
+    latest=$(go_archive "$stubs" go1.27.3)
+    previous=$(go_archive "$stubs" go1.26.10)
+    older=$(go_archive "$stubs" go1.25.0)
+    patched=$(go_archive "$stubs" go1.26.11)
+    { printf '[\n'; go_release go1.27.3 "$latest"; printf ',\n'; go_release go1.26.10 "$previous"; printf ',\n'
+        go_release go1.25.0 "$older"; printf '\n]\n'; } >"$stubs/releases.json"
+    { printf '[\n'; go_release go1.27.3 "$latest"; printf ',\n'; go_release go1.26.10 "$(printf '%064d' 1)"
+        printf '\n]\n'; } >"$stubs/bad-releases.json"
+    { printf '[\n'; go_release go1.27.3 "$latest"; printf ',\n'; go_release go1.26.11 "$patched"
+        printf '\n]\n'; } >"$stubs/patched-releases.json"
+
+    home=$(new_home)
+    status=0
+    output=$(run_go_installer "$home") || status=$?
+    if [[ $status -ne 0 || $output != *'Installed go1.26.10'* ]] ||
+        [[ $(<"$home/curl.log") != $'https://go.dev/dl/?mode=json\nhttps://go.dev/dl/go1.26.10.linux-amd64.tar.gz' ]] ||
+        [[ $(head -n 1 "$home/.local/share/go/VERSION") != go1.26.10 ]] ||
+        [[ $(readlink "$home/.local/bin/go") != "$home/.local/share/go/bin/go" ]] ||
+        [[ $(readlink "$home/.local/bin/gofmt") != "$home/.local/share/go/bin/gofmt" ]]; then
+        fail "install-go.sh" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    fi
+    status=0
+    output=$(run_go_installer "$home") || status=$?
+    [[ $status -eq 0 && $output == *'already installed'* && $(grep -c 'tar.gz' "$home/curl.log") -eq 1 ]] ||
+        fail "install-go.sh, up to date" "exit status $status: $output"
+    status=0
+    output=$(run_go_installer "$home" CURL_LIST="$stubs/patched-releases.json") || status=$?
+    [[ $status -eq 0 && $output == *'Installed go1.26.11'* && $(head -n 1 "$home/.local/share/go/VERSION") == go1.26.11 &&
+        $(ls -A "$home/.local/share") == go ]] ||
+        fail "install-go.sh, new patch" "exit status $status: $output; $(ls -A "$home/.local/share")"
+    pass "install-go.sh installs the newest patch one release behind, links go and gofmt, keeps it, and moves to a new patch"
+
+    status=0
+    output=$(run_go_installer "$home" -- --latest) || status=$?
+    [[ $status -eq 0 && $(head -n 1 "$home/.local/share/go/VERSION") == go1.27.3 &&
+        $(ls -A "$home/.local/share") == go && -L $home/.local/bin/go ]] ||
+        fail "install-go.sh --latest" "exit status $status: $output; $(ls -A "$home/.local/share")"
+    status=0
+    output=$(run_go_installer "$home" -- 1.25.0) || status=$?
+    [[ $status -eq 0 && $(head -n 1 "$home/.local/share/go/VERSION") == go1.25.0 &&
+        $(tail -n 2 "$home/curl.log") == $'https://go.dev/dl/?mode=json&include=all\nhttps://go.dev/dl/go1.25.0.linux-amd64.tar.gz' ]] ||
+        fail "install-go.sh 1.25.0" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    pass "install-go.sh installs the latest with --latest or the version given, replacing the old toolchain"
+
+    for pair in "CURL_LIST=$stubs/bad-releases.json|does not match its checksum" '-- 1.99.0|has no go1.99.0.linux-amd64.tar.gz'; do
+        status=0
+        # shellcheck disable=SC2086 # the variable and the arguments are split on purpose
+        output=$(run_go_installer "$home" ${pair%%|*}) || status=$?
+        [[ $status -eq 1 && $output == *"${pair#*|}"* && $(head -n 1 "$home/.local/share/go/VERSION") == go1.25.0 ]] ||
+            fail "install-go.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    home=$(new_home)
+    mkdir -p "$home/mine"
+    : >"$home/mine/notes"
+    status=0
+    output=$(run_go_installer "$home" GO_INSTALL_DIR="$home/mine") || status=$?
+    [[ $status -eq 1 && $output == *'is not a Go toolchain'* && $(ls -A "$home/mine") == notes && ! -e $home/curl.log ]] ||
+        fail "install-go.sh, not a toolchain" "exit status $status: $output"
+    pass "install-go.sh changes nothing on a wrong checksum, a missing version, or a directory that is not Go"
+
+    home=$(new_home)
+    mkdir -p "$home/.local/bin"
+    printf 'mine\n' >"$home/.local/bin/go"
+    status=0
+    output=$(run_go_installer "$home") || status=$?
+    [[ $status -eq 0 && $output == *'left'*'/.local/bin/go alone'* && $(<"$home/.local/bin/go") == mine &&
+        -L $home/.local/bin/gofmt ]] || fail "install-go.sh, own go" "exit status $status: $output"
+    pass "install-go.sh leaves a go in ~/.local/bin that is not its link alone"
+
+    home=$(new_home)
+    for pair in '-- --newest|2|not --latest or a version' 'UNAME_M=riscv64|1|no Linux build' \
+        "PATH=$stubs/bin|1|missing"; do
+        status=0
+        # shellcheck disable=SC2086 # the variable and the arguments are split on purpose
+        output=$(run_go_installer "$home" ${pair%%|*}) || status=$?
+        [[ $status -eq $(cut -d'|' -f2 <<<"$pair") && $output == *"${pair##*|}"* && ! -e $home/curl.log ]] ||
+            fail "install-go.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    pass "install-go.sh refuses a bad argument, an unknown CPU, or a missing tool before downloading"
+}
+
 # run_init_local HOME [ARG...] prints the output of init-local.sh run with HOME in
 # an empty environment holding only the core utilities, and returns its status.
 run_init_local() {
@@ -1712,6 +1868,7 @@ main() {
     check_init_gitconfig
     check_init_local
     check_vscode_installer
+    check_go_installer
     check_theme_selection
     check_editor_configs
     check_tmux_status

@@ -29,6 +29,11 @@
       "name": "vscode",
       "run": ["bash", "home/.local/share/helpers/sh/install-vscode.sh"],
       "provides": "code"
+    },
+    {
+      "name": "go",
+      "run": ["bash", "home/.local/share/helpers/sh/install-go.sh"],
+      "provides": "go"
     }
   ]
 }
