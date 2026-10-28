@@ -34,6 +34,11 @@
       "name": "go",
       "run": ["bash", "home/.local/share/helpers/sh/install-go.sh"],
       "provides": "go"
+    },
+    {
+      "name": "uv",
+      "run": ["bash", "home/.local/share/helpers/sh/install-uv.sh"],
+      "creates": ".local/bin/uv"
     }
   ]
 }

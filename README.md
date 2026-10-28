@@ -122,15 +122,17 @@ lists them without running anything.
 | `dotnet-sdk` | [install-dotnet.sh](home/.local/share/helpers/sh/install-dotnet.sh): the latest LTS SDK into `~/.dotnet` | `~/.dotnet/dotnet` exists |
 | `vscode` | [install-vscode.sh](home/.local/share/helpers/sh/install-vscode.sh): VS Code and its `code` command from Microsoft's signed package repository with dnf or apt (needs sudo) | `code` is on PATH |
 | `go` | [install-go.sh](home/.local/share/helpers/sh/install-go.sh): the newest patch of the Go release one behind the latest into `~/.local/share/go`, checked against go.dev's SHA-256, with `go` and `gofmt` linked into `~/.local/bin` | `go` is on PATH |
+| `uv` | [install-uv.sh](home/.local/share/helpers/sh/install-uv.sh): the latest release's `uv` and `uvx` into `~/.local/bin`, checked against the release's SHA-256, ahead of any `uv` your distribution installed | `~/.local/bin/uv` exists |
 
 The installers download from the internet, so read each step before approving
 it. Nothing downloaded is piped into a shell: `install-dotnet.sh` saves
 Microsoft's installer to a file and runs it only if it is a script, and
-`install-oh-my-posh.sh` downloads the binary for this CPU from the GitHub
-release and installs it only if its SHA-256 matches the release's
-`checksums.txt`. Oh My Posh's own `install.sh` checks no checksum and also
-fetches its themes, which needs `unzip`; these dotfiles bring their own themes.
-Either helper stops if a download fails.
+`install-oh-my-posh.sh`, `install-go.sh`, and `install-uv.sh` download the
+binary or archive for this CPU and install it only if its SHA-256 matches the
+checksum the release publishes. Oh My Posh's own `install.sh` checks no checksum
+and also fetches its themes, which needs `unzip`; these dotfiles bring their own
+themes. uv's own installer is a download piped into a shell that offers to edit
+`.bashrc`. Every installer stops if a download fails.
 
 Once linked, `install-dotnet.sh` is also a command of its own. Its optional
 first argument picks what to install: `LTS` or `STS`, a release such as `10.0`
@@ -163,6 +165,7 @@ repository; afterward they are ordinary commands:
 | [install-vscode.sh](home/.local/share/helpers/sh/install-vscode.sh) | Installs VS Code and its `code` command from Microsoft's signed package repository with dnf or apt (needs sudo), unless `code` is already there; succeeds only when `code --version` runs |
 | [install-go.sh](home/.local/share/helpers/sh/install-go.sh) | Installs Go from go.dev into `~/.local/share/go` (or `GO_INSTALL_DIR`): the newest patch of the release one behind the latest, the latest with `--latest`, or a version (`install-go.sh 1.26.10`), after checking the archive's SHA-256; links `go` and `gofmt` into `~/.local/bin`, which leads PATH; rerun it to move to a newer patch |
 | [install-oh-my-posh.sh](home/.local/share/helpers/sh/install-oh-my-posh.sh) | Installs Oh My Posh from its GitHub release into `~/.local/bin`, the latest or the version given (`install-oh-my-posh.sh 31.9.1`), after checking the binary's SHA-256; leaves a matching binary alone; turns on config auto-reload |
+| [install-uv.sh](home/.local/share/helpers/sh/install-uv.sh) | Installs `uv` and `uvx` from uv's GitHub release into `~/.local/bin`, which leads PATH, the latest or the version given (`install-uv.sh 0.13.6`), after checking the archive's SHA-256 and that the unpacked `uv` reports that version; leaves a `uv` already at that version alone; rerun it to move to a newer release |
 
 ## Layout
 
@@ -320,9 +323,10 @@ override the sizes or filters in a later file such as `local.sh`. To move the
 archive, set `HISTARCHIVE` in a file that sorts before `history.sh`, such as
 `00-local.sh`.
 
-Installers that offer to edit `.bashrc`, such as gcloud's `install.sh` and the
-uv installer, would write through the link into this repository. Decline, or set
-`UV_NO_MODIFY_PATH=1` for uv; the snippets already handle PATH and completion.
+Installers that offer to edit `.bashrc`, such as gcloud's `install.sh` and uv's
+own installer, would write through the link into this repository. Decline, or
+use `install-uv.sh`, or set `UV_NO_MODIFY_PATH=1` for uv's installer; the
+snippets already handle PATH and completion.
 Credentials, kubeconfig files, and settings written by `aws configure` or
 `gcloud config set` stay in their usual home-directory locations, unmanaged.
 
