@@ -1122,6 +1122,137 @@ STUB
     pass "install-go.sh refuses a bad argument, an unknown CPU, or a missing tool before downloading"
 }
 
+# run_uv_installer HOME [VAR=value...] [-- ARG...] prints the output of
+# install-uv.sh run with HOME, the stub curl and uname, and the core tools it
+# needs on PATH, and returns its status.
+run_uv_installer() {
+    local home=$1 stubs="$TEST_ROOT/uv"
+    local -a vars=()
+    shift
+    while [[ $# -gt 0 && $1 != -- ]]; do
+        vars+=("$1")
+        shift
+    done
+    [[ ${1-} != -- ]] || shift
+    env -i HOME="$home" PATH="$stubs/bin:$stubs/core" CURL_FILES="$stubs/releases" \
+        ${vars[@]+"${vars[@]}"} "$BASH" "$REPO/home/.local/share/helpers/sh/install-uv.sh" "$@" 2>&1
+}
+
+# uv_release DIR VERSION [REPORTED] writes DIR/VERSION/uv-x86_64-unknown-linux-gnu.tar.gz,
+# a fake release whose uv and uvx print REPORTED (VERSION by default) for
+# --version and log other calls, with its .sha256 file beside it.
+uv_release() {
+    local dir=$1/$2 reported=${3:-$2} name=uv-x86_64-unknown-linux-gnu sum tool
+    rm -rf "$dir"
+    mkdir -p "$dir/tree/$name"
+    for tool in uv uvx; do
+        # shellcheck disable=SC2016 # the stub, not this shell, expands $* and $LOG
+        printf '#!/usr/bin/env bash\nif [[ $* == --version ]]; then echo "%s %s (x86_64-unknown-linux-gnu)"; else printf "%s %%s\\n" "$*" >>"$LOG"; fi\n' \
+            "$tool" "$reported" "$tool" >"$dir/tree/$name/$tool"
+    done
+    chmod +x "$dir/tree/$name/uv" "$dir/tree/$name/uvx"
+    tar -czf "$dir/$name.tar.gz" -C "$dir/tree" "$name"
+    sum=$(sha256sum <"$dir/$name.tar.gz")
+    printf '%s  %s\n' "${sum%% *}" "$name.tar.gz" >"$dir/$name.tar.gz.sha256"
+    rm -rf "$dir/tree"
+}
+
+# install-uv.sh installs uv and uvx from the latest release, named by the GitHub
+# API, or the version given, only when the archive's SHA-256 matches its .sha256
+# file and the unpacked uv reports that version, replaces each with a rename,
+# and leaves a uv already at that version alone without downloading the archive.
+# It refuses a wrong or missing checksum, a release that does not exist, an
+# archive whose uv reports another version, an unknown CPU, a bad version, or a
+# missing tool, changing nothing. A stub curl serves the API's answer, the
+# archives, and their checksums from a directory per version and logs each URL.
+check_uv_installer() {
+    local stubs="$TEST_ROOT/uv" home status output tool pair name=uv-x86_64-unknown-linux-gnu
+    mkdir -p "$stubs/bin" "$stubs/core" "$stubs/releases"
+    for tool in bash cp grep head install mkdir mktemp mv rm sha256sum tar gzip; do
+        ln -s "$(command -v "$tool")" "$stubs/core/$tool"
+    done
+    cat >"$stubs/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+if [[ ${1-} != --disable ]]; then echo 'curl: called without --disable first' >&2; exit 2; fi
+out='' url=''
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --output) out=$2; shift ;;
+        https://*) url=$1 ;;
+    esac
+    shift
+done
+printf '%s\n' "$url" >>"$HOME/curl.log"
+case $url in
+    https://api.github.com/*/releases/latest) printf '{\n  "tag_name": "%s",\n  "name": "%s"\n}\n' "${LATEST:-0.13.6}" "${LATEST:-0.13.6}" >"$out" ;;
+    */releases/download/*) path=${url#*/releases/download/}
+        cp "$CURL_FILES/$path" "$out" 2>/dev/null || { echo 'curl: (22) 404' >&2; exit 22; } ;;
+    *) echo "curl: unexpected URL $url" >&2; exit 2 ;;
+esac
+STUB
+    cat >"$stubs/bin/uname" <<'STUB'
+#!/bin/sh
+case $1 in -m) echo "${UNAME_M:-x86_64}" ;; *) echo Linux ;; esac
+STUB
+    chmod +x "$stubs/bin/curl" "$stubs/bin/uname"
+    uv_release "$stubs/releases" 0.13.6
+    uv_release "$stubs/releases" 0.13.5
+    uv_release "$stubs/releases" 0.0.1
+    printf '%064d  %s.tar.gz\n' 1 "$name" >"$stubs/releases/0.0.1/$name.tar.gz.sha256"
+    uv_release "$stubs/releases" 0.0.2
+    printf '%064d  %s.tar.gz\n' 2 uv-aarch64-unknown-linux-gnu >"$stubs/releases/0.0.2/$name.tar.gz.sha256"
+    uv_release "$stubs/releases" 0.0.3 0.0.4
+
+    home=$(new_home)
+    status=0
+    output=$(run_uv_installer "$home") || status=$?
+    if [[ $status -ne 0 || $output != *'Installed uv 0.13.6'* || -e $home/.local/bin/.uv.new ]] ||
+        [[ $(<"$home/curl.log") != "https://api.github.com/repos/astral-sh/uv/releases/latest"$'\n'"https://github.com/astral-sh/uv/releases/download/0.13.6/$name.tar.gz.sha256"$'\n'"https://github.com/astral-sh/uv/releases/download/0.13.6/$name.tar.gz" ]] ||
+        [[ $(LOG=/dev/null "$home/.local/bin/uv" --version) != 'uv 0.13.6 '* || $(LOG=/dev/null "$home/.local/bin/uvx" --version) != 'uvx 0.13.6 '* ]]; then
+        fail "install-uv.sh" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    fi
+    status=0
+    output=$(run_uv_installer "$home") || status=$?
+    [[ $status -eq 0 && $output == *'already installed'* && $(grep -c 'tar.gz' "$home/curl.log") -eq 2 ]] ||
+        fail "install-uv.sh, up to date" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    status=0
+    output=$(run_uv_installer "$home" LATEST=0.13.5) || status=$?
+    [[ $status -eq 0 && $output == *'Installed uv 0.13.5'* && $(LOG=/dev/null "$home/.local/bin/uv" --version) == 'uv 0.13.5 '* ]] ||
+        fail "install-uv.sh, new release" "exit status $status: $output"
+    pass "install-uv.sh installs the checked latest uv and uvx, leaves them alone after, and moves to a new release"
+
+    for pair in '0.13.6|0.13.6' 'v0.13.5|0.13.5'; do
+        home=$(new_home)
+        status=0
+        output=$(run_uv_installer "$home" -- "${pair%%|*}") || status=$?
+        [[ $status -eq 0 && $(<"$home/curl.log") != *api.github.com* &&
+            $(<"$home/curl.log") == *"/releases/download/${pair#*|}/$name.tar.gz" &&
+            $(LOG=/dev/null "$home/.local/bin/uv" --version) == "uv ${pair#*|} "* ]] ||
+            fail "install-uv.sh ${pair%%|*}" "exit status $status: $output; curl: $(<"$home/curl.log")"
+    done
+    pass "install-uv.sh installs the version given without asking which is latest"
+
+    home=$(new_home)
+    for pair in '0.0.1|does not match its checksum' '0.0.2|lists no checksum' '0.0.3|does not run as 0.0.3' \
+        '0.99.0|could not download'; do
+        status=0
+        output=$(run_uv_installer "$home" -- "${pair%%|*}") || status=$?
+        [[ $status -eq 1 && $output == *"${pair#*|}"* && ! -e $home/.local/bin && ! -e $home/log ]] ||
+            fail "install-uv.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    pass "install-uv.sh installs nothing when the checksum is wrong or missing, the uv reports another version, or a download fails"
+
+    home=$(new_home)
+    for pair in 'UNAME_M=mips|1|no Linux build' 'UNAME_M=x86_64 -- 0.13|2|not a version' "PATH=$stubs/bin|1|missing"; do
+        status=0
+        # shellcheck disable=SC2086 # the variable and the arguments are split on purpose
+        output=$(run_uv_installer "$home" ${pair%%|*}) || status=$?
+        [[ $status -eq $(cut -d'|' -f2 <<<"$pair") && $output == *"${pair##*|}"* && ! -e $home/curl.log ]] ||
+            fail "install-uv.sh, ${pair%%|*}" "exit status $status: $output"
+    done
+    pass "install-uv.sh refuses an unknown CPU, a bad version, or a missing tool before downloading"
+}
+
 # run_init_local HOME [ARG...] prints the output of init-local.sh run with HOME in
 # an empty environment holding only the core utilities, and returns its status.
 run_init_local() {
@@ -1869,6 +2000,7 @@ main() {
     check_init_local
     check_vscode_installer
     check_go_installer
+    check_uv_installer
     check_theme_selection
     check_editor_configs
     check_tmux_status

@@ -3,9 +3,9 @@
 # https://docs.astral.sh/uv/reference/environment/
 # Uncomment defaults to use them on every machine, or set them in
 # ~/.bashrc.d/local.sh for this one; values already set take precedence.
-# uv's standalone installer and `uv tool install` use ~/.local/bin, which .bashrc
-# already adds to PATH;
-# run the uv installer with UV_NO_MODIFY_PATH=1 so it leaves .bashrc alone.
+# install-uv.sh and `uv tool install` use ~/.local/bin, which .bashrc already
+# adds to PATH; if you use uv's own installer instead, run it with
+# UV_NO_MODIFY_PATH=1 so it leaves .bashrc alone.
 # export UV_PYTHON_PREFERENCE=${UV_PYTHON_PREFERENCE:-managed}  # managed, only-managed, system, only-system
 # export UV_PYTHON_DOWNLOADS=${UV_PYTHON_DOWNLOADS:-automatic}  # automatic, manual, never
 # export UV_LINK_MODE=${UV_LINK_MODE:-copy}  # quiets hardlink warnings across filesystems
