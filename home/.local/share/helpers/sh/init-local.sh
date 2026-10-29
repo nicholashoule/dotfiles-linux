@@ -34,46 +34,35 @@ usage() {
 }
 
 # starter prints the starter file: comments only, so it changes nothing until
-# you uncomment a line.
+# you uncomment a line. It shows only what belongs here; settings that do not,
+# such as Go's (go env -w) or credentials (each tool's own files), are left out
+# rather than explained.
 starter() {
     cat <<'EOF'
 # shellcheck shell=bash
-# Settings for this machine only. The dotfiles' local setup step (init-local.sh)
-# created this file and never links or replaces it, so nothing here reaches the
-# public repository. Uncomment what you need.
-#
-# .bashrc sources it with the snippets in ~/.bashrc.d, in alphabetical order. A
-# snippet that sorts after it, such as oh-my-posh.sh, reads its settings while
-# loading; one that sorts before it, such as aws.sh, has already run, so an
-# assignment here replaces that snippet's value. Credentials belong in each
-# tool's own files, not here.
+# Settings for this machine only. .bashrc sources this file with ~/.bashrc.d;
+# the dotfiles created it once and never link it. Uncomment what you need.
 
-# Prompt theme: the name of a theme in ~/.config/oh-my-posh/themes, without
-# .omp.json, or a path to any theme file.
+# Prompt theme: a theme in ~/.config/oh-my-posh/themes, or a theme file's path.
 # OHMYPOSH_THEME=bubbles
 
-# Completion list colors: an entry appended here wins (mi colors subcommands and
-# options).
+# Completion list colors (mi colors subcommands and options).
 # LS_COLORS+=':mi=00;36'
 
-# AWS region (us-west-2 by default) and profile.
+# AWS region and profile.
 # export AWS_REGION=eu-west-1 AWS_DEFAULT_REGION=eu-west-1
 # export AWS_PROFILE=work
 
 # Kubeconfig files, merged in order.
 # export KUBECONFIG=$HOME/.kube/config:$HOME/.kube/work
 
-# History size: these replace history.sh's HISTSIZE and HISTFILESIZE; the
-# archive keeps every command either way.
+# History size.
 # HISTSIZE=100000 HISTFILESIZE=200000
 
-# Go settings: use `go env -w`, because GOBIN and GOPATH set here come too late
-# for golang.sh's PATH step.
-
-# A directory first on PATH, added once even when this file runs again.
+# A directory first on PATH, added once.
 # case ":$PATH:" in *":$HOME/opt/tool/bin:"*) ;; *) PATH="$HOME/opt/tool/bin:$PATH" ;; esac
 
-# Aliases and functions for this machine.
+# Aliases.
 # alias proj='cd ~/projects'
 EOF
 }
