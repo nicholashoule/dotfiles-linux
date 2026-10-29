@@ -1,8 +1,9 @@
 # dotfiles-linux
 
-Bash dotfiles for Linux, managed by the separate `homeskillet` CLI. This
+Bash dotfiles for Linux, managed by the separate
+[homeskillet](https://github.com/nicholashoule/homeskillet) CLI. This
 repository holds the configuration, its setup steps, and shell checks; the
-manager's Go source, tests, and binaries live in the `homeskillet` repository.
+manager's Go source, tests, and releases live in the homeskillet repository.
 
 ## What's Included
 
@@ -22,22 +23,47 @@ manager's Go source, tests, and binaries live in the `homeskillet` repository.
 - **Helpers and setup steps:** a starter `~/.gitconfig` for your identity,
   commit signing, and GitHub and GitLab credentials, a commented `local.sh` for
   this machine's overrides, and reviewed installers for Oh My Posh, its font,
-  the .NET SDK, VS Code, and Go.
+  the .NET SDK, VS Code, Go, and uv.
 - **Safety:** a pre-commit hook, CI, and `.gitignore` rules that keep secrets
   and personal details out of this public repository, plus regression checks.
 
 ## Install
 
-Install `homeskillet` by running `make install` in a checkout of its repository.
-It keeps each version under `~/.local/share/homeskillet/versions/` and links
-`~/.local/bin/homeskillet` to the active one; this repository's `.bashrc`
-already puts `~/.local/bin` on PATH. Go is needed only to build the manager, not
-to use this configuration.
+Install [homeskillet](https://github.com/nicholashoule/homeskillet) v0.3.0 or
+later, which the commands below need. Every release publishes a static binary
+per platform and a `SHA256SUMS` file on its
+[Releases](https://github.com/nicholashoule/homeskillet/releases) page.
+Download the Linux binary for your machine (`homeskillet-linux-arm64` on Arm),
+check it, and let it install itself:
 
 ```sh
-homeskillet version            # version and build details
-git pull && make install       # update, run in the homeskillet checkout
-homeskillet self use previous  # roll back to the previous version
+gh release download --repo nicholashoule/homeskillet --pattern homeskillet-linux-amd64 --pattern SHA256SUMS
+grep ' homeskillet-linux-amd64$' SHA256SUMS | sha256sum --check
+chmod +x homeskillet-linux-amd64
+./homeskillet-linux-amd64 self install
+rm homeskillet-linux-amd64 SHA256SUMS
+```
+
+Without the GitHub CLI, download the same two files from the Releases page.
+`gh attestation verify homeskillet-linux-amd64 --repo nicholashoule/homeskillet`,
+run before `self install`, also confirms that the release workflow built the
+binary from its tag. With Go installed, `make install` in a checkout of the
+homeskillet repository builds and installs it instead; Go is needed only to
+build the manager, not to use this configuration.
+
+`self install` keeps each version under `~/.local/share/homeskillet/versions/`
+and links `~/.local/bin/homeskillet` to the active one; this repository's
+`.bashrc` already puts `~/.local/bin` on PATH. From then on, homeskillet
+updates itself, downloading only from its own GitHub releases and checking each
+download against the release's `SHA256SUMS`, and keeps the version you had so
+going back is one command:
+
+```sh
+homeskillet version           # version and build details
+homeskillet update            # install the newest release, if it is not installed
+homeskillet update --dry-run  # download and check it, but change nothing
+homeskillet self releases     # the published releases, and which are installed
+homeskillet use previous      # roll back; update's closing note names the version
 ```
 
 Keep this clone in a permanent location, because installed symlinks point into
@@ -87,8 +113,8 @@ reload automatically; open a new terminal after installation.
 
 To update, run `git pull` in this clone, then `homeskillet link --repo .` to
 link any new files. Changes to files that are already linked take effect at
-once, in new shells; there is nothing to reinstall. Update homeskillet itself as
-shown under [Install](#install).
+once, in new shells; there is nothing to reinstall. `homeskillet update`
+updates homeskillet itself (see [Install](#install)).
 
 To uninstall, unlink, then restore anything you backed up:
 
@@ -589,7 +615,8 @@ that links this clone, so commit them deliberately.
 
 ## Requirements
 
-Bash and a GNU/Linux userland. Tools (Go, .NET, the cloud and infrastructure
+Bash, a GNU/Linux userland, and homeskillet v0.3.0 or later, which added
+`homeskillet update`. Tools (Go, .NET, the cloud and infrastructure
 CLIs, uv, Oh My Posh, tmux, vim, VS Code) and terminal applications are
 optional and installed separately or through the setup steps; anything missing
 is skipped.
